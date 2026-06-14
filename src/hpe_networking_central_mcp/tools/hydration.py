@@ -66,12 +66,14 @@ _PROVIDER_DEFINITIONS = {
         "provider": "central",
         "label": "HPE Aruba Networking Central",
         "aliases": ["central", "aruba", "aruba-central"],
+        "spec_source": "central",
         "base_url_setting": "CENTRAL_BASE_URL",
     },
     "greenlake": {
         "provider": "greenlake",
         "label": "HPE GreenLake Platform",
         "aliases": ["greenlake", "glp", "hpe-greenlake"],
+        "spec_source": "glp",
         "base_url_setting": "GLP_BASE_URL",
     },
 }
@@ -773,11 +775,11 @@ def _query_candidate_endpoints(
         params["search"] = search.strip()
     provider_key = _normalise_provider_filter(provider)
     if provider_key:
-        params["provider"] = provider_key
+        params["spec_source"] = _PROVIDER_DEFINITIONS[provider_key]["spec_source"]
         return graph_manager.query(
             "MATCH (e:ApiEndpoint)-[:HAS_RESPONSE]->(r:Response)"
             "-[:RESPONSE_REFERENCES]->(c:SchemaComponent) "
-            "WHERE e.method = 'GET' AND c.spec_source = $provider "
+            "WHERE e.method = 'GET' AND c.spec_source = $spec_source "
             f"{search_clause}"
             "RETURN DISTINCT e.endpoint_id AS endpoint_id, e.method AS method, "
             "e.path AS path, e.summary AS summary, e.operationId AS operationId, "

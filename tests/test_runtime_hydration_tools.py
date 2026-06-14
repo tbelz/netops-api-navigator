@@ -158,8 +158,8 @@ class FakeHydrationGraph:
         if (
             "ApiEndpoint" in cypher
             and "e.endpoint_id AS endpoint_id" in cypher
-            and "c.spec_source = $provider" in cypher
-            and (params or {}).get("provider") != "central"
+            and "c.spec_source = $spec_source" in cypher
+            and (params or {}).get("spec_source") != "central"
         ):
             return []
         if "ApiEndpoint" in cypher and "e.endpoint_id AS endpoint_id" in cypher:
@@ -671,9 +671,9 @@ def test_plan_runtime_hydration_filters_search_results_by_provider() -> None:
     assert parsed["provider"] == "greenlake"
     assert parsed["plans"] == []
     assert parsed["next_best_action"]["action"] == "search_api_graph"
-    provider_queries = [params for cypher, params, _ in graph.queries if "c.spec_source = $provider" in cypher]
+    provider_queries = [params for cypher, params, _ in graph.queries if "c.spec_source = $spec_source" in cypher]
     assert provider_queries
-    assert provider_queries[0]["provider"] == "greenlake"
+    assert provider_queries[0]["spec_source"] == "glp"
     assert graph.executions == []
 
 
