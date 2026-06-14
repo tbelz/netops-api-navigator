@@ -258,6 +258,7 @@ def register_runtime_hydration_tools(
             path=path,
             search=search or question,
             limit=safe_limit,
+            provider_key=provider_key,
         )
         plans = []
         for endpoint in endpoints:
@@ -909,10 +910,23 @@ def _planning_endpoints(
     path: str,
     search: str,
     limit: int,
+    provider_key: str,
 ) -> list[dict[str, Any]]:
     if endpoint_id.strip() or path.strip():
         return [_resolve_endpoint(graph_manager, endpoint_id=endpoint_id, path=path)]
-    return _query_candidate_endpoints(graph_manager, search, limit)
+    rows = _query_candidate_endpoints(graph_manager, search, _MAX_CANDIDATE_LIMIT)
+    filtered = []
+    for endpoint in rows:
+        responses = _query_endpoint_responses(
+            graph_manager,
+            str(endpoint.get("endpoint_id") or ""),
+        )
+        endpoint_provider = _endpoint_provider(endpoint, responses)
+        if not endpoint_provider or endpoint_provider == provider_key:
+            filtered.append(endpoint)
+        if len(filtered) >= limit:
+            break
+    return filtered
 
 
 def _build_endpoint_hydration_plan(
@@ -928,6 +942,7 @@ def _build_endpoint_hydration_plan(
     endpoint_id = str(endpoint.get("endpoint_id") or "")
     parameters = _query_endpoint_parameters(graph, endpoint_id)
     responses = _query_endpoint_responses(graph, endpoint_id)
+    endpoint_provider = _endpoint_provider(endpoint, responses)
     identity_hints = _query_identity_hints(graph, responses)
     candidate = classify_hydration_candidate(
         endpoint=endpoint,
@@ -941,19 +956,23 @@ def _build_endpoint_hydration_plan(
         query_params=query_params,
         path_params=path_params,
     )
-    observations = _query_runtime_observations(
+    observations = _query_runtime_observations_for_scope(
         graph,
         endpoint_id=endpoint_id,
         provider=provider_key,
+        query_params=query_params,
+        path_params=path_params,
         limit=1,
     )
     latest_observation = _summarise_latest_observation(observations)
-    facts = _query_runtime_facts(
-        graph,
-        endpoint_id=endpoint_id,
-        entity_type="",
-        identity_key="",
-        limit=5,
+    facts = (
+        _query_runtime_facts_for_observation(
+            graph,
+            str(latest_observation.get("observation_id") or ""),
+            limit=5,
+        )
+        if latest_observation
+        else []
     )
     for fact in facts:
         fact.pop("attributesJson", None)
@@ -961,6 +980,7 @@ def _build_endpoint_hydration_plan(
         candidate=candidate,
         validation_errors=validation_errors,
         provider_status=provider_status,
+        endpoint_provider=endpoint_provider,
         latest_observation=latest_observation,
         fact_count=len(facts),
         freshness_target=freshness_target,
@@ -973,6 +993,7 @@ def _build_endpoint_hydration_plan(
             "summary": endpoint.get("summary") or "",
             "operationId": endpoint.get("operationId") or "",
             "category": endpoint.get("category") or "",
+            "provider": endpoint_provider,
         },
         "candidate": candidate,
         "provider": provider_key,
@@ -986,11 +1007,15 @@ def _build_endpoint_hydration_plan(
         "materialized_fact_count": len(facts),
         "sample_facts": facts,
         "recommended_action": action,
-        "hydrate_call": _hydrate_call_plan(
-            candidate=candidate,
-            provider_key=provider_key,
-            query_params=query_params,
-            path_params=path_params,
+        "hydrate_call": (
+            _hydrate_call_plan(
+                candidate=candidate,
+                provider_key=provider_key,
+                query_params=query_params,
+                path_params=path_params,
+            )
+            if not endpoint_provider or endpoint_provider == provider_key
+            else None
         ),
         "materialize_call": _materialize_call_plan(latest_observation),
     }
@@ -1009,10 +1034,18 @@ def _plan_action(
     candidate: dict[str, Any],
     validation_errors: list[str],
     provider_status: dict[str, Any],
+    endpoint_provider: str,
     latest_observation: dict[str, Any] | None,
     fact_count: int,
     freshness_target: int,
 ) -> dict[str, Any]:
+    if endpoint_provider and endpoint_provider != provider_status["provider"]:
+        return {
+            "action": "select_matching_provider",
+            "reason": "Endpoint belongs to a different API provider than the selected hydration provider.",
+            "endpoint_provider": endpoint_provider,
+            "selected_provider": provider_status["provider"],
+        }
     if candidate["blockers"]:
         return {
             "action": "unsupported",
@@ -1109,6 +1142,7 @@ def _next_best_plan_action(plans: list[dict[str, Any]]) -> dict[str, Any]:
         "materialize_existing_observation",
         "hydrate_endpoint",
         "refresh_hydration",
+        "select_matching_provider",
         "ask_for_parameters",
         "use_stale_observation_or_configure_provider",
         "configure_provider_or_use_existing_graph",
@@ -1133,6 +1167,31 @@ def _next_best_plan_action(plans: list[dict[str, Any]]) -> dict[str, Any]:
         "endpoint_id": first["endpoint"]["endpoint_id"],
         "reason": recommended.get("reason", ""),
     }
+
+
+def _endpoint_provider(endpoint: dict[str, Any], responses: list[dict[str, Any]]) -> str:
+    explicit = str(endpoint.get("sourceProvider") or endpoint.get("provider") or "").strip()
+    if explicit:
+        return _normalise_provider_if_known(explicit)
+    for row in responses:
+        component_id = str(row.get("component_id") or row.get("schema_name") or "")
+        prefix = component_id.split(":", 1)[0].strip().lower()
+        provider = _normalise_provider_if_known(prefix)
+        if provider:
+            return provider
+    endpoint_id = str(endpoint.get("endpoint_id") or "")
+    prefix = endpoint_id.split(":", 1)[0].strip().lower()
+    return _normalise_provider_if_known(prefix)
+
+
+def _normalise_provider_if_known(provider: str) -> str:
+    provider_key = (provider or "").strip().lower()
+    if not provider_key:
+        return ""
+    for canonical, definition in _PROVIDER_DEFINITIONS.items():
+        if provider_key in definition["aliases"]:
+            return canonical
+    return ""
 
 
 def _require_graph(graph_manager: "GraphManager | None") -> "GraphManager":
@@ -1626,6 +1685,37 @@ def _query_runtime_observations(
     )
 
 
+def _query_runtime_observations_for_scope(
+    graph_manager: "GraphManager",
+    *,
+    endpoint_id: str,
+    provider: str,
+    query_params: dict[str, Any],
+    path_params: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    return graph_manager.query(
+        "MATCH (run:HydrationRun)-[:PRODUCED_OBSERVATION]->(obs:RuntimeObservation) "
+        "WHERE run.endpoint_id = $endpoint_id AND run.provider = $provider "
+        "AND run.parametersJson = $parameters_json AND run.scopeJson = $scope_json "
+        "RETURN obs.observation_id AS observation_id, obs.run_id AS run_id, "
+        "obs.endpoint_id AS endpoint_id, obs.provider AS provider, "
+        "obs.observedAt AS observedAt, obs.status AS status, "
+        "obs.rootKind AS rootKind, obs.responseHash AS responseHash, "
+        "obs.responseBytes AS responseBytes, obs.itemCount AS itemCount, "
+        "obs.schema_component_id AS schema_component_id, "
+        "obs.staleAfterSeconds AS staleAfterSeconds, obs.rawJson AS rawJson "
+        f"ORDER BY obs.observedAt DESC LIMIT {limit}",
+        params={
+            "endpoint_id": endpoint_id,
+            "provider": provider,
+            "parameters_json": _stable_json(query_params or {}),
+            "scope_json": _stable_json(path_params or {}),
+        },
+        read_only=True,
+    )
+
+
 def _query_runtime_observation(
     graph_manager: "GraphManager",
     observation_id: str,
@@ -1817,6 +1907,27 @@ def _query_runtime_facts(
         "fact.attributesJson AS attributesJson "
         f"ORDER BY fact.materializedAt DESC LIMIT {limit}",
         params=params,
+        read_only=True,
+    )
+
+
+def _query_runtime_facts_for_observation(
+    graph_manager: "GraphManager",
+    observation_id: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if not observation_id:
+        return []
+    return graph_manager.query(
+        "MATCH (fact:RuntimeFact) "
+        "WHERE fact.observation_id = $observation_id "
+        "RETURN fact.fact_id AS fact_id, fact.observation_id AS observation_id, "
+        "fact.object_id AS object_id, fact.endpoint_id AS endpoint_id, "
+        "fact.entityType AS entityType, fact.identityKey AS identityKey, "
+        "fact.confidence AS confidence, fact.materializedAt AS materializedAt, "
+        "fact.attributesJson AS attributesJson "
+        f"ORDER BY fact.materializedAt DESC LIMIT {limit}",
+        params={"observation_id": observation_id},
         read_only=True,
     )
 

@@ -49,6 +49,31 @@ class FakeHydrationGraph:
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         self.queries.append((cypher, params, read_only))
+        if "PRODUCED_OBSERVATION" in cypher and "HydrationRun" in cypher:
+            if (params or {}).get("provider") != "central":
+                return []
+            if (params or {}).get("parameters_json") != '{"limit":"2","offset":"0"}':
+                return []
+            if (params or {}).get("scope_json") != "{}":
+                return []
+            return [
+                {
+                    "observation_id": "obs-1",
+                    "run_id": "run-1",
+                    "endpoint_id": "GET:/monitoring/v1/devices",
+                    "provider": "central",
+                    "observedAt": "2026-06-14T10:00:00Z",
+                    "status": "success",
+                    "contentType": "application/json",
+                    "rootKind": "object",
+                    "responseHash": "abc123",
+                    "responseBytes": 200,
+                    "itemCount": 1,
+                    "schema_component_id": "central:schemas:DeviceList",
+                    "staleAfterSeconds": 300,
+                    "rawJson": '{"items":[]}',
+                }
+            ]
         if "MATCH (fact:RuntimeFact" in cypher and "OPTIONAL MATCH" in cypher:
             return [
                 {
@@ -208,7 +233,7 @@ class FreshPlanningGraph(FakeHydrationGraph):
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         rows = super().query(cypher, params=params, read_only=read_only)
-        if "MATCH (obs:RuntimeObservation" in cypher:
+        if "RuntimeObservation" in cypher:
             for row in rows:
                 row["observedAt"] = "2999-01-01T00:00:00Z"
                 row["staleAfterSeconds"] = 3600
@@ -224,6 +249,8 @@ class ParameterizedHydrationGraph(FakeHydrationGraph):
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         self.queries.append((cypher, params, read_only))
+        if "PRODUCED_OBSERVATION" in cypher and "HydrationRun" in cypher:
+            return []
         if "MATCH (fact:RuntimeFact" in cypher:
             return []
         if "MATCH (obs:RuntimeObservation" in cypher:
@@ -551,8 +578,32 @@ def test_plan_runtime_hydration_prefers_fresh_materialized_facts() -> None:
     assert parsed["next_best_action"]["action"] == "use_materialized_facts"
     assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "0"}
     assert plan["materialize_call"]["args"] == {"observation_id": "obs-1"}
+    scoped_queries = [params for cypher, params, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
+    assert scoped_queries
+    assert scoped_queries[-1]["parameters_json"] == '{"limit":"2","offset":"0"}'
+    assert scoped_queries[-1]["scope_json"] == "{}"
     assert all(read_only is True for _, _, read_only in graph.queries)
     assert graph.executions == []
+
+
+def test_plan_runtime_hydration_does_not_reuse_different_parameter_scope() -> None:
+    graph = FreshPlanningGraph()
+    tools = _make_tools(graph_manager=graph, central_client=FakeAPIClient())
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            query_params={"limit": "2", "offset": "50"},
+        )
+    )
+
+    plan = parsed["plans"][0]
+    assert plan["latest_observation"] is None
+    assert plan["materialized_fact_count"] == 0
+    assert plan["recommended_action"]["action"] == "hydrate_endpoint"
+    assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "50"}
+    scoped_queries = [params for cypher, params, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
+    assert scoped_queries[-1]["parameters_json"] == '{"limit":"2","offset":"50"}'
 
 
 def test_plan_runtime_hydration_explains_missing_path_parameters() -> None:
@@ -591,9 +642,28 @@ def test_plan_runtime_hydration_reports_missing_provider_for_unhydrated_endpoint
     plan = parsed["plans"][0]
     assert parsed["provider"] == "greenlake"
     assert parsed["provider_ready"]["can_hydrate"] is False
+    assert plan["endpoint"]["provider"] == "central"
     assert plan["validation_errors"] == []
-    assert plan["recommended_action"]["action"] == "configure_provider_or_use_existing_graph"
-    assert plan["hydrate_call"]["args"]["provider"] == "greenlake"
+    assert plan["recommended_action"]["action"] == "select_matching_provider"
+    assert plan["hydrate_call"] is None
+    assert parsed["next_best_action"]["action"] == "select_matching_provider"
+    assert graph.executions == []
+
+
+def test_plan_runtime_hydration_filters_search_results_by_provider() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph, greenlake_client=FakeAPIClient())
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            search="device",
+            provider="greenlake",
+        )
+    )
+
+    assert parsed["provider"] == "greenlake"
+    assert parsed["plans"] == []
+    assert parsed["next_best_action"]["action"] == "search_api_graph"
     assert graph.executions == []
 
 
