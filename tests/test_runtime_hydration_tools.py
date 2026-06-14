@@ -28,6 +28,7 @@ from hpe_networking_central_mcp.tools.hydration import (
     classify_hydration_candidate,
     register_runtime_hydration_tools,
 )
+from hpe_networking_central_mcp.tools.graph import register_graph_tools
 
 pytestmark = pytest.mark.unit
 
@@ -460,6 +461,12 @@ def _make_tools(
     return {tool.name: tool.fn for tool in mcp._tool_manager._tools.values()}
 
 
+def _make_graph_tools(graph_manager: object) -> dict[str, object]:
+    mcp = FastMCP("test-runtime-graph-alias")
+    register_graph_tools(mcp, Settings(runtime_hydration=True), graph_manager)
+    return {tool.name: tool.fn for tool in mcp._tool_manager._tools.values()}
+
+
 def _bootstrap_hydration_conn(conn) -> None:
     for ddl in (
         NODE_TABLES
@@ -533,6 +540,7 @@ def test_runtime_hydration_shell_tool_surface() -> None:
     assert set(tools) == {
         "get_runtime_hydration_status",
         "list_runtime_hydration_candidates",
+        "hydrate_runtime_graph",
         "hydrate_runtime_endpoint",
         "list_runtime_observations",
         "get_runtime_observation",
@@ -565,6 +573,7 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
         "get_runtime_hydration_state",
         "list_runtime_hydration_providers",
         "plan_runtime_hydration",
+        "hydrate_runtime_graph",
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
@@ -580,6 +589,7 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
         "typed_runtime_highways": True,
         "provider_readiness": True,
         "planning_helpers": True,
+        "graph_first_workflow": True,
     }
     assert parsed["graph_available"] is True
     assert parsed["clients_available"]["central"] is False
@@ -705,6 +715,29 @@ def test_plan_runtime_hydration_does_not_reuse_different_parameter_scope() -> No
     assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "50"}
     scoped_queries = [cypher for cypher, _, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
     assert 'run.parametersJson = \'{"limit":"2","offset":"50"}\'' in scoped_queries[-1]
+
+
+def test_hydrate_runtime_graph_dry_run_search_only_does_not_call_api() -> None:
+    graph = FakeHydrationGraph()
+    client = FakeAPIClient()
+    tools = _make_tools(graph_manager=graph, central_client=client)
+
+    parsed = json.loads(
+        tools["hydrate_runtime_graph"](
+            search="device",
+            dry_run=True,
+            query_params={"limit": "2", "offset": "50"},
+        )
+    )
+
+    assert parsed["ok"] is True
+    assert parsed["executed"] is False
+    assert parsed["dry_run"] is True
+    assert parsed["plan"]["total"] == 1
+    assert parsed["plan"]["next_best_action"]["action"] == "hydrate_endpoint"
+    assert parsed["query_runtime"][0]["tool"] == "query_runtime"
+    assert client.requests == []
+    assert graph.executions == []
 
 
 def test_plan_runtime_hydration_explains_missing_path_parameters() -> None:
@@ -896,6 +929,135 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
             ).rows_as_dict()
         )
         assert rows == [{"n": 1}]
+
+
+def test_hydrate_runtime_graph_happy_path_then_query_runtime_reads_graph() -> None:
+    with TemporaryDirectory(prefix="runtime_hydration_graph_workflow_") as tmp:
+        db = lb.Database(str(Path(tmp) / "graph_db"), max_db_size=256 * 1024 * 1024)
+        conn = lb.Connection(db)
+        _bootstrap_hydration_conn(conn)
+        _seed_hydratable_endpoint(conn)
+        graph = LadybugHydrationGraph(conn)
+        hydration_tools = _make_tools(graph_manager=graph, central_client=NestedAPIClient())
+        graph_tools = _make_graph_tools(graph)
+
+        result = json.loads(
+            hydration_tools["hydrate_runtime_graph"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                query_params={"limit": "2"},
+            )
+        )
+
+        assert result["ok"] is True
+        assert result["executed"] is True
+        assert result["hydrated"] is True
+        assert result["used_existing"] is False
+        assert result["observation_id"]
+        assert result["materialized_count"] == 1
+        assert result["promoted_count"] == 1
+        assert {item["tool"] for item in result["query_runtime"]} == {"query_runtime"}
+
+        latest = json.loads(
+            graph_tools["query_runtime"](
+                cypher=(
+                    "MATCH (obs:RuntimeObservation {endpoint_id: $endpointId}) "
+                    "RETURN obs.observation_id AS observation_id, obs.itemCount AS item_count "
+                    "ORDER BY obs.observedAt DESC LIMIT 1"
+                ),
+                parameters=json.dumps({"endpointId": "GET:/monitoring/v1/devices"}),
+            )
+        )
+        assert latest == [
+            {
+                "observation_id": result["observation_id"],
+                "item_count": 1,
+            }
+        ]
+
+        facts = json.loads(
+            graph_tools["query_runtime"](
+                cypher=(
+                    "MATCH (fact:RuntimeFact {endpoint_id: $endpointId}) "
+                    "RETURN fact.identityKey AS identity_key, fact.entityType AS entity_type"
+                ),
+                parameters=json.dumps({"endpointId": "GET:/monitoring/v1/devices"}),
+            )
+        )
+        assert facts == [{"identity_key": "serial=SN1", "entity_type": "Device"}]
+
+        provenance = json.loads(
+            graph_tools["query_runtime"](
+                cypher=(
+                    "MATCH (ent:RuntimeEntity)-[:ENTITY_FROM_FACT]->(fact:RuntimeFact) "
+                    "MATCH (fact)-[:FACT_FROM_RUN]->(run:HydrationRun) "
+                    "MATCH (fact)-[:FACT_FROM_API]->(api:ApiEndpoint) "
+                    "RETURN ent.identityKey AS identity_key, run.run_id AS run_id, "
+                    "api.path AS path LIMIT 1"
+                )
+            )
+        )
+        assert provenance == [
+            {
+                "identity_key": "serial=SN1",
+                "run_id": result["run_id"],
+                "path": "/monitoring/v1/devices",
+            }
+        ]
+
+        fields = json.loads(
+            graph_tools["query_runtime"](
+                cypher=(
+                    "MATCH (:RuntimeObservation {observation_id: $observationId})"
+                    "-[:OBSERVATION_HAS_OBJECT]->(:RuntimeObservedObject)"
+                    "-[:OBSERVED_OBJECT_HAS_FIELD]->(field:RuntimeObservedField) "
+                    "OPTIONAL MATCH (field)-[:OBSERVED_FIELD_PROPERTY]->(prop:Property) "
+                    "RETURN field.name AS name, prop.property_id AS property_id "
+                    "ORDER BY name"
+                ),
+                parameters=json.dumps({"observationId": result["observation_id"]}),
+            )
+        )
+        assert {row["name"] for row in fields} >= {
+            "interfaces",
+            "labels",
+            "metadata",
+            "serial",
+        }
+        assert any(row["property_id"] for row in fields)
+
+
+def test_hydrate_runtime_graph_refresh_returns_new_observation_freshness() -> None:
+    with TemporaryDirectory(prefix="runtime_hydration_graph_refresh_") as tmp:
+        db = lb.Database(str(Path(tmp) / "graph_db"), max_db_size=256 * 1024 * 1024)
+        conn = lb.Connection(db)
+        _bootstrap_hydration_conn(conn)
+        _seed_hydratable_endpoint(conn)
+        graph = LadybugHydrationGraph(conn)
+        tools = _make_tools(graph_manager=graph, central_client=NestedAPIClient())
+
+        stale = json.loads(
+            tools["hydrate_runtime_endpoint"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                query_params={"limit": "2"},
+                stale_after_seconds=0,
+            )
+        )
+        assert stale["ok"] is True
+
+        refreshed = json.loads(
+            tools["hydrate_runtime_graph"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                query_params={"limit": "2"},
+                freshness_max_age_seconds=300,
+            )
+        )
+
+        assert refreshed["ok"] is True
+        assert refreshed["action"] == "refresh_hydration"
+        assert refreshed["hydrated"] is True
+        assert refreshed["observation_id"] != stale["observation_id"]
+        assert refreshed["freshness"]["state"] == "fresh"
+        assert refreshed["freshness"]["stale_after_seconds"] == 300
 
 
 def test_hydrate_runtime_endpoint_requires_live_client() -> None:

@@ -335,8 +335,8 @@ def register_graph_tools(mcp, settings: Settings, graph: GraphManager):
     def _run_query(cypher: str, parameters: str, tool_label: str) -> str:
         """Shared body for ``query_graph`` and its focused aliases.
 
-        All 5 read tools (``query_graph``, ``query_api_schema``, ``query_fts``,
-        ``query_topology``, ``query_yang``) delegate here. They differ only
+        All read tools (``query_graph`` and focused aliases) delegate here.
+        They differ only
         in docstring focus so each gets its own ~1500-char guidance budget
         without overflowing one giant tool description; the caps, error
         hints, and freshness scanning are identical.
@@ -541,11 +541,14 @@ def register_graph_tools(mcp, settings: Settings, graph: GraphManager):
         - ``query_fts`` — keyword search via ``CALL QUERY_FTS_INDEX(...)``.
         - ``query_topology`` — Org / SiteCollection / Site / Device /
           DeviceGroup / UnmanagedDevice and HAS_* / LINKED_TO / CONNECTED_TO.
+        - ``query_runtime`` — hydrated observations, facts, entities,
+          freshness, and provenance from runtime hydration.
         - ``query_yang`` — YangPath, CONFIGURES_YANG, PROPERTY_AT_YANG.
 
         Use ``query_graph`` when your query spans topics (e.g. topology +
-        FTS) or uses node tables the aliases don't describe (``DocSection``,
-        ``Script``, ``ApiCategory``, custom labels from ``write_graph``).
+        runtime facts) or uses node tables the aliases don't describe
+        (``DocSection``, ``Script``, ``ApiCategory``, custom labels from
+        ``write_graph``).
         For writes use ``write_graph``; for one raw schema JSON use
         ``get_raw_schema(component_id)``. Full schema: ``graph://schema``.
 
@@ -767,6 +770,58 @@ def register_graph_tools(mcp, settings: Settings, graph: GraphManager):
         if queries is not None:
             return _run_batch(queries, "query_topology")
         return _run_query(cypher, parameters, "query_topology")
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
+    )
+    def query_runtime(cypher: str = "", parameters: str = "{}", queries: list[dict] | None = None) -> str:
+        """Cypher over hydrated runtime state written by runtime hydration.
+
+        Use after ``hydrate_runtime_graph`` for live observations, facts,
+        entity highways, freshness, and provenance. Nodes: ``HydrationRun``,
+        ``RuntimeObservation``,
+        ``RuntimeObservedObject``, ``RuntimeObservedField``, ``RuntimeFact``,
+        ``RuntimeEntity``. Edges: ``CALLED_API``, ``PRODUCED_OBSERVATION``,
+        ``OBSERVATION_HAS_OBJECT``, ``OBSERVED_OBJECT_HAS_FIELD``,
+        ``OBSERVED_FIELD_PROPERTY``, ``OBSERVATION_MATERIALIZED_FACT``,
+        ``FACT_FROM_OBJECT``, ``FACT_FROM_RUN``, ``FACT_FROM_API``,
+        ``ENTITY_FROM_FACT``, ``ENTITY_FROM_API``.
+
+        Latest observed state for an endpoint:
+        ```cypher
+        MATCH (obs:RuntimeObservation {endpoint_id: $endpointId})
+        RETURN obs.observation_id, obs.provider, obs.observedAt,
+               obs.itemCount, obs.staleAfterSeconds
+        ORDER BY obs.observedAt DESC LIMIT 5
+        ```
+
+        Entities with API provenance:
+        ```cypher
+        MATCH (ent:RuntimeEntity {entityType: $type})
+              -[:ENTITY_FROM_FACT]->(fact:RuntimeFact)
+              -[:FACT_FROM_RUN]->(run:HydrationRun)
+        MATCH (fact)-[:FACT_FROM_API]->(api:ApiEndpoint)
+        RETURN ent.identityKey, ent.latestFactId, run.finishedAt,
+               api.method, api.path LIMIT 25
+        ```
+
+        Fields linked to schema properties:
+        ```cypher
+        MATCH (obs:RuntimeObservation {observation_id: $obs})
+              -[:OBSERVATION_HAS_OBJECT]->(:RuntimeObservedObject)
+              -[:OBSERVED_OBJECT_HAS_FIELD]->(f:RuntimeObservedField)
+        OPTIONAL MATCH (f)-[:OBSERVED_FIELD_PROPERTY]->(p:Property)
+        RETURN f.name, f.scalarType, f.valueJson, p.property_id LIMIT 100
+        ```
+
+        Args:
+            cypher: Read-only Cypher.
+            parameters: JSON-encoded parameter dict (default ``"{}"``).
+            queries: Optional batch (cap 25); see ``query_graph``.
+        """
+        if queries is not None:
+            return _run_batch(queries, "query_runtime")
+        return _run_query(cypher, parameters, "query_runtime")
 
     @mcp.tool(
         annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),

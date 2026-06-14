@@ -163,9 +163,11 @@ assert list_id is not None
 tool_result = assert_rpc_ok(read_response(list_id, timeout=60.0), "tools/list")
 tools = {tool["name"] for tool in tool_result.get("tools", [])}
 for required in {
+    "query_runtime",
     "get_runtime_hydration_status",
     "list_runtime_hydration_candidates",
     "plan_runtime_hydration",
+    "hydrate_runtime_graph",
     "hydrate_runtime_endpoint",
     "list_runtime_observations",
     "materialize_runtime_facts",
@@ -199,6 +201,18 @@ plan = parse_json_tool(
 )
 if plan.get("next_best_action", {}).get("action") != "configure_provider_or_use_existing_graph":
     raise SystemExit(f"Unexpected first-use offline hydration plan: {plan}")
+
+dry_run = parse_json_tool(
+    "hydrate_runtime_graph",
+    call_tool(
+        "hydrate_runtime_graph",
+        {"endpoint_id": target, "provider": "central", "dry_run": True},
+    ),
+)
+if dry_run.get("executed") is not False or not dry_run.get("dry_run"):
+    raise SystemExit(f"hydrate_runtime_graph dry run executed unexpectedly: {dry_run}")
+if dry_run.get("plan", {}).get("next_best_action", {}).get("action") != "configure_provider_or_use_existing_graph":
+    raise SystemExit(f"Unexpected hydrate_runtime_graph dry-run plan: {dry_run}")
 
 proc.stdin.close()
 try:

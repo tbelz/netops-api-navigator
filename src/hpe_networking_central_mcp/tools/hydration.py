@@ -118,6 +118,7 @@ def register_runtime_hydration_tools(
                     "get_runtime_hydration_state",
                     "list_runtime_hydration_providers",
                     "plan_runtime_hydration",
+                    "hydrate_runtime_graph",
                     "materialize_runtime_facts",
                     "list_runtime_facts",
                     "get_runtime_fact",
@@ -133,6 +134,7 @@ def register_runtime_hydration_tools(
                     "typed_runtime_highways": True,
                     "provider_readiness": True,
                     "planning_helpers": True,
+                    "graph_first_workflow": True,
                 },
                 "graph_available": bool(gm is not None and getattr(gm, "is_available", False)),
                 "clients_available": {
@@ -240,13 +242,12 @@ def register_runtime_hydration_tools(
         freshness_max_age_seconds: int = _DEFAULT_STALE_AFTER_SECONDS,
         limit: int = _DEFAULT_PLAN_LIMIT,
     ) -> str:
-        """Plan useful runtime hydration work without calling live APIs.
+        """Advanced: plan runtime hydration work without calling live APIs.
 
         This advisory helper combines endpoint classification, supplied
         parameters, provider readiness, existing observation freshness, and
-        materialized facts. It explains whether an agent should use existing
-        graph data, materialize existing observations, hydrate a read endpoint,
-        or ask for missing parameters first.
+        materialized facts. Prefer ``hydrate_runtime_graph(dry_run=True)`` for
+        the normal agent path; use this when debugging planner decisions.
         """
         graph = _require_graph(gm)
         provider_key = _normalise_provider(provider)
@@ -307,6 +308,205 @@ def register_runtime_hydration_tools(
             openWorldHint=True,
         ),
     )
+    def hydrate_runtime_graph(
+        endpoint_id: str = "",
+        path: str = "",
+        search: str = "",
+        provider: str = "central",
+        query_params: dict[str, str] | None = None,
+        path_params: dict[str, str] | None = None,
+        freshness_max_age_seconds: int = _DEFAULT_STALE_AFTER_SECONDS,
+        max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+        materialize: bool = True,
+        promote: bool = True,
+        dry_run: bool = False,
+        limit: int = _DEFAULT_PLAN_LIMIT,
+    ) -> str:
+        """Primary write path: hydrate live GET data into the graph.
+
+        Normal flow: plan an endpoint, call it when exact and needed, persist
+        runtime observations, materialize facts, promote entity highways, then
+        inspect results with ``query_runtime``. Search-only or ``dry_run`` calls
+        return plans/candidates without live API calls. Lower-level hydration
+        tools are for debugging individual stages.
+        """
+        graph = _require_graph(gm)
+        params = query_params or {}
+        scope = path_params or {}
+        provider_key = _normalise_provider(provider)
+        safe_limit = _clamp_limit_with_max(limit, _DEFAULT_PLAN_LIMIT, _MAX_PLAN_LIMIT)
+        freshness_target = _clamp_int(
+            freshness_max_age_seconds,
+            default=_DEFAULT_STALE_AFTER_SECONDS,
+            minimum=0,
+            maximum=_MAX_STALE_AFTER_SECONDS,
+        )
+        response_cap = _clamp_int(
+            max_response_bytes,
+            default=_DEFAULT_MAX_RESPONSE_BYTES,
+            minimum=10_000,
+            maximum=_MAX_RESPONSE_BYTES,
+        )
+
+        plan_payload = json.loads(
+            plan_runtime_hydration(
+                endpoint_id=endpoint_id,
+                path=path,
+                search=search,
+                provider=provider_key,
+                query_params=params,
+                path_params=scope,
+                freshness_max_age_seconds=freshness_target,
+                limit=safe_limit,
+            )
+        )
+        plans = plan_payload.get("plans") or []
+        exact_target = bool(endpoint_id.strip() or path.strip())
+        if dry_run or not exact_target:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "executed": False,
+                    "dry_run": True,
+                    "reason": (
+                        "dry_run requested"
+                        if dry_run
+                        else "Provide endpoint_id or exact path to execute hydration."
+                    ),
+                    "plan": plan_payload,
+                    "query_runtime": _runtime_query_suggestions(
+                        (plans[0].get("endpoint") or {}).get("endpoint_id", "")
+                        if plans else ""
+                    ),
+                },
+                indent=2,
+                default=str,
+            )
+
+        if len(plans) != 1:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "executed": False,
+                    "reason": "Expected exactly one endpoint plan for execution.",
+                    "plan": plan_payload,
+                },
+                indent=2,
+                default=str,
+            )
+
+        selected_plan = plans[0]
+        selected_endpoint_id = selected_plan["endpoint"]["endpoint_id"]
+        action = (selected_plan.get("recommended_action") or {}).get("action", "")
+        latest_observation = selected_plan.get("latest_observation") or None
+        observation_id = str((latest_observation or {}).get("observation_id") or "")
+        hydration_result: dict[str, Any] | None = None
+        materialize_result: dict[str, Any] | None = None
+        promote_result: dict[str, Any] | None = None
+        used_existing = action in {
+            "use_materialized_facts",
+            "materialize_existing_observation",
+        }
+
+        if action in {
+            "ask_for_parameters",
+            "select_matching_provider",
+            "unsupported",
+            "configure_provider_or_use_existing_graph",
+            "use_stale_observation_or_configure_provider",
+        }:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "executed": False,
+                    "reason": selected_plan.get("recommended_action", {}).get("reason", action),
+                    "next_action": selected_plan.get("recommended_action"),
+                    "plan": plan_payload,
+                    "query_runtime": _runtime_query_suggestions(selected_endpoint_id, observation_id),
+                },
+                indent=2,
+                default=str,
+            )
+
+        if action in {"hydrate_endpoint", "refresh_hydration"}:
+            hydration_result = json.loads(
+                hydrate_runtime_endpoint(
+                    endpoint_id=selected_endpoint_id,
+                    provider=provider_key,
+                    query_params=params,
+                    path_params=scope,
+                    stale_after_seconds=freshness_target,
+                    max_response_bytes=response_cap,
+                )
+            )
+            if not hydration_result.get("ok"):
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "executed": True,
+                        "hydrated": False,
+                        "used_existing": False,
+                        "endpoint_id": selected_endpoint_id,
+                        "hydration": hydration_result,
+                        "query_runtime": _runtime_query_suggestions(selected_endpoint_id),
+                    },
+                    indent=2,
+                    default=str,
+                )
+            observation_id = str(hydration_result.get("observation_id") or "")
+            used_existing = False
+
+        if materialize and observation_id and action != "use_materialized_facts":
+            materialize_result = json.loads(
+                materialize_runtime_facts(observation_id=observation_id)
+            )
+
+        if promote and (materialize_result or action == "use_materialized_facts"):
+            promote_result = json.loads(
+                promote_runtime_entities(endpoint_id=selected_endpoint_id, provider=provider_key)
+            )
+
+        returned_freshness = (latest_observation or {}).get("freshness")
+        if hydration_result and observation_id:
+            refreshed_observation = _query_runtime_observation(graph, observation_id)
+            if refreshed_observation:
+                returned_freshness = _annotate_observation_freshness(
+                    refreshed_observation
+                ).get("freshness")
+
+        return json.dumps(
+            {
+                "ok": True,
+                "executed": bool(hydration_result),
+                "hydrated": bool(hydration_result and hydration_result.get("ok")),
+                "used_existing": used_existing,
+                "endpoint_id": selected_endpoint_id,
+                "provider": provider_key,
+                "action": action,
+                "run_id": (hydration_result or {}).get("run_id")
+                or (latest_observation or {}).get("run_id"),
+                "observation_id": observation_id,
+                "freshness": returned_freshness,
+                "materialized_count": (
+                    materialize_result or {}
+                ).get("materialized_count", selected_plan.get("materialized_fact_count", 0)),
+                "promoted_count": (promote_result or {}).get("promoted_count", 0),
+                "hydration": hydration_result,
+                "materialization": materialize_result,
+                "promotion": promote_result,
+                "query_runtime": _runtime_query_suggestions(selected_endpoint_id, observation_id),
+            },
+            indent=2,
+            default=str,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     def hydrate_runtime_endpoint(
         endpoint_id: str = "",
         path: str = "",
@@ -316,13 +516,12 @@ def register_runtime_hydration_tools(
         stale_after_seconds: int = _DEFAULT_STALE_AFTER_SECONDS,
         max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
     ) -> str:
-        """Hydrate one bounded GET endpoint into runtime observation nodes.
+        """Advanced: hydrate one bounded GET endpoint into observations.
 
-        This is the first generic executor. It supports GET endpoints only,
-        requires any path/query parameters to be supplied explicitly, calls the
-        selected provider client, and persists raw response/provenance data
-        back into the graph. Fact materialization and entity promotion are
-        explicit follow-up steps.
+        Prefer ``hydrate_runtime_graph`` for normal use because it also handles
+        planning, freshness reuse, fact materialization, entity promotion, and
+        ``query_runtime`` follow-up snippets. This tool is for stage-level
+        debugging or manual repair.
         """
         graph = _require_graph(gm)
         endpoint = _resolve_endpoint(graph, endpoint_id=endpoint_id, path=path)
@@ -469,7 +668,11 @@ def register_runtime_hydration_tools(
         limit: int = _DEFAULT_OBSERVATION_LIMIT,
         include_raw: bool = False,
     ) -> str:
-        """List persisted runtime observations without calling live APIs."""
+        """Advanced: list persisted observations without live API calls.
+
+        Prefer ``query_runtime`` for graph retrieval. Use this compact helper
+        when inspecting raw observation envelopes.
+        """
         graph = _require_graph(gm)
         provider_filter = _normalise_provider_filter(provider)
         rows = _query_runtime_observations(
@@ -493,7 +696,11 @@ def register_runtime_hydration_tools(
         object_limit: int = _DEFAULT_OBJECT_LIMIT,
         field_limit: int = _DEFAULT_FIELD_LIMIT,
     ) -> str:
-        """Fetch one runtime observation with observed objects and fields."""
+        """Advanced: fetch one observation with observed objects and fields.
+
+        Prefer ``query_runtime`` for joins/provenance; use this when inspecting
+        one raw observation envelope.
+        """
         graph = _require_graph(gm)
         clean_id = observation_id.strip()
         if not clean_id:
@@ -533,7 +740,7 @@ def register_runtime_hydration_tools(
         endpoint_id: str = "",
         provider: str = "",
     ) -> str:
-        """Report whether hydrated state for an endpoint is missing, fresh, or stale."""
+        """Advanced: report if endpoint state is missing, fresh, or stale."""
         graph = _require_graph(gm)
         if not endpoint_id.strip():
             raise ToolError("endpoint_id is required.")
@@ -583,12 +790,11 @@ def register_runtime_hydration_tools(
         object_limit: int = _DEFAULT_MATERIALIZATION_OBJECT_LIMIT,
         object_offset: int = 0,
     ) -> str:
-        """Materialize generic RuntimeFact nodes when observed identity is clear.
+        """Advanced: materialize RuntimeFact nodes from observations.
 
-        This does not create Central-specific typed tables. It promotes
-        observed objects with clear identity hints into generic facts and
-        preserves edges back to the observation, observed object, hydration run,
-        and source API endpoint.
+        Prefer ``hydrate_runtime_graph`` for normal use. This does not create
+        Central-specific typed tables; it promotes observed objects with clear
+        identity hints into generic facts with provenance.
         """
         graph = _require_graph(gm)
         provider_filter = _normalise_provider_filter(provider)
@@ -716,13 +922,12 @@ def register_runtime_hydration_tools(
         provider: str = "",
         limit: int = _DEFAULT_ENTITY_LIMIT,
     ) -> str:
-        """Promote clear-identity facts into generic RuntimeEntity highways.
+        """Advanced: promote facts into generic RuntimeEntity highways.
 
-        RuntimeEntity is the typed highway layer for the first roadmap cycle:
-        it creates stable, provider-scoped entity nodes keyed by entity type and
-        identity key. It does not create Central-specific device/site/client
-        tables. Provenance remains available through ENTITY_FROM_FACT links to
-        RuntimeFact, which in turn links back to observations, runs, and APIs.
+        Prefer ``hydrate_runtime_graph`` for normal use. RuntimeEntity creates
+        stable provider-scoped highways keyed by entity type and identity key;
+        provenance remains available through fact, observation, run, and API
+        edges.
         """
         graph = _require_graph(gm)
         provider_filter = _normalise_provider_filter(provider)
@@ -1287,6 +1492,56 @@ def _materialize_call_plan(latest_observation: dict[str, Any] | None) -> dict[st
         "tool": "materialize_runtime_facts",
         "args": {"observation_id": observation_id},
     }
+
+
+def _runtime_query_suggestions(endpoint_id: str = "", observation_id: str = "") -> list[dict[str, Any]]:
+    """Return compact query_runtime follow-up snippets for agent handoff."""
+    suggestions: list[dict[str, Any]] = []
+    if endpoint_id:
+        suggestions.append(
+            {
+                "label": "latest_observations",
+                "tool": "query_runtime",
+                "cypher": (
+                    "MATCH (obs:RuntimeObservation {endpoint_id: $endpointId}) "
+                    "RETURN obs.observation_id, obs.provider, obs.observedAt, "
+                    "obs.itemCount, obs.staleAfterSeconds "
+                    "ORDER BY obs.observedAt DESC LIMIT 5"
+                ),
+                "parameters": {"endpointId": endpoint_id},
+            }
+        )
+        suggestions.append(
+            {
+                "label": "entities_with_provenance",
+                "tool": "query_runtime",
+                "cypher": (
+                    "MATCH (ent:RuntimeEntity)-[:ENTITY_FROM_FACT]->(fact:RuntimeFact) "
+                    "MATCH (fact)-[:FACT_FROM_API]->(api:ApiEndpoint {endpoint_id: $endpointId}) "
+                    "OPTIONAL MATCH (fact)-[:FACT_FROM_RUN]->(run:HydrationRun) "
+                    "RETURN ent.entityType, ent.identityKey, ent.latestFactId, "
+                    "run.finishedAt, api.method, api.path LIMIT 25"
+                ),
+                "parameters": {"endpointId": endpoint_id},
+            }
+        )
+    if observation_id:
+        suggestions.append(
+            {
+                "label": "observed_fields",
+                "tool": "query_runtime",
+                "cypher": (
+                    "MATCH (:RuntimeObservation {observation_id: $observationId})"
+                    "-[:OBSERVATION_HAS_OBJECT]->(:RuntimeObservedObject)"
+                    "-[:OBSERVED_OBJECT_HAS_FIELD]->(field:RuntimeObservedField) "
+                    "OPTIONAL MATCH (field)-[:OBSERVED_FIELD_PROPERTY]->(prop:Property) "
+                    "RETURN field.name, field.scalarType, field.valueJson, prop.property_id "
+                    "LIMIT 100"
+                ),
+                "parameters": {"observationId": observation_id},
+            }
+        )
+    return suggestions
 
 
 def _next_best_plan_action(plans: list[dict[str, Any]]) -> dict[str, Any]:

@@ -146,6 +146,7 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
     for hydration_tool in (
         "get_runtime_hydration_status",
         "list_runtime_hydration_candidates",
+        "hydrate_runtime_graph",
         "hydrate_runtime_endpoint",
         "list_runtime_observations",
         "get_runtime_observation",
@@ -233,6 +234,7 @@ def test_server_registers_runtime_hydration_foundation_when_enabled(monkeypatch,
     tool_names = {t.name for t in tool_mgr._tools.values()}
     assert "get_runtime_hydration_status" in tool_names
     assert "list_runtime_hydration_candidates" in tool_names
+    assert "hydrate_runtime_graph" in tool_names
     assert "hydrate_runtime_endpoint" in tool_names
     assert "list_runtime_observations" in tool_names
     assert "get_runtime_observation" in tool_names

@@ -335,11 +335,18 @@ class TestGetRawSchema:
         assert "bodyJson" not in parsed
 
 
-# ── Tool aliasing (query_api_schema / query_fts / query_topology / query_yang) ──
+# ── Tool aliasing (query_api_schema / query_fts / query_topology / query_runtime / query_yang) ──
 
 
 class TestQueryAliases:
-    ALIASES = ("query_graph", "query_api_schema", "query_fts", "query_topology", "query_yang")
+    ALIASES = (
+        "query_graph",
+        "query_api_schema",
+        "query_fts",
+        "query_topology",
+        "query_runtime",
+        "query_yang",
+    )
 
     def test_all_aliases_registered(self, gm):
         tools = _make_tools(gm)
@@ -383,11 +390,24 @@ class TestQueryAliases:
                 "so tool-description-capping clients don't truncate guidance."
             )
 
+    def test_query_graph_points_runtime_reads_to_runtime_alias(self, gm):
+        tools = _make_tools(gm)
+        doc = tools["query_graph"].__doc__ or ""
+        assert "query_runtime" in doc
+        assert "hydrated runtime state" in (tools["query_runtime"].__doc__ or "")
+
 
 class TestQueryBatchMode:
-    """``queries=[...]`` batch dispatch shared by all 5 read tools."""
+    """``queries=[...]`` batch dispatch shared by all read aliases."""
 
-    ALIASES = ("query_graph", "query_api_schema", "query_fts", "query_topology", "query_yang")
+    ALIASES = (
+        "query_graph",
+        "query_api_schema",
+        "query_fts",
+        "query_topology",
+        "query_runtime",
+        "query_yang",
+    )
 
     def test_batch_executes_in_order(self, gm):
         qg = _make_query_tool(gm)
@@ -473,4 +493,3 @@ class TestQueryBatchMode:
         assert env["batch"] is True
         assert env["ok"] == 2
         assert [r["label"] for r in env["results"]] == ["a", "b"]
-
