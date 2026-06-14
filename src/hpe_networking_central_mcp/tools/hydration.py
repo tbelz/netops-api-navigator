@@ -1037,6 +1037,7 @@ def _persist_observed_object(
     observed: dict[str, Any],
 ) -> None:
     object_id = f"{observation_id}:object:{index}"
+    object_component_id = _resolve_observed_object_component(graph, component_id, observed)
     graph.execute(
         "CREATE (:RuntimeObservedObject {object_id: $object_id, "
         "observation_id: $observation_id, endpoint_id: $endpoint_id, "
@@ -1048,7 +1049,7 @@ def _persist_observed_object(
             "observation_id": observation_id,
             "endpoint_id": endpoint_id,
             "json_pointer": observed["jsonPointer"],
-            "schema_component_id": component_id,
+            "schema_component_id": object_component_id,
             "item_index": observed.get("itemIndex", -1),
             "identity_json": observed["identityJson"],
             "value_type": observed["valueType"],
@@ -1061,12 +1062,12 @@ def _persist_observed_object(
         "MERGE (obs)-[:OBSERVATION_HAS_OBJECT]->(obj)",
         {"observation_id": observation_id, "object_id": object_id},
     )
-    if component_id:
+    if object_component_id:
         graph.execute(
             "MATCH (obj:RuntimeObservedObject {object_id: $object_id}), "
             "(schema:SchemaComponent {component_id: $component_id}) "
             "MERGE (obj)-[:OBSERVED_OBJECT_SCHEMA]->(schema)",
-            {"object_id": object_id, "component_id": component_id},
+            {"object_id": object_id, "component_id": object_component_id},
         )
     for field_index, field in enumerate(observed["fields"]):
         _persist_observed_field(
@@ -1077,6 +1078,41 @@ def _persist_observed_object(
             field_index=field_index,
             field=field,
         )
+
+
+def _resolve_observed_object_component(
+    graph: "GraphManager",
+    component_id: str,
+    observed: dict[str, Any],
+) -> str:
+    if not component_id:
+        return ""
+    item_key = _observed_item_key(observed)
+    if not item_key:
+        return component_id
+    try:
+        rows = graph.query(
+            "MATCH (root:SchemaComponent {component_id: $component_id})"
+            "-[:HAS_PROPERTY]->(prop:Property {name: $item_key}) "
+            "OPTIONAL MATCH (prop)-[:HAS_ITEM_SCHEMA]->(item:SchemaComponent) "
+            "OPTIONAL MATCH (prop)-[:PROPERTY_OF_TYPE]->(typed:SchemaComponent) "
+            "RETURN coalesce(item.component_id, typed.component_id, '') AS component_id "
+            "LIMIT 1",
+            params={"component_id": component_id, "item_key": item_key},
+            read_only=True,
+        )
+    except Exception:
+        return component_id
+    resolved = str((rows[0] if rows else {}).get("component_id") or "")
+    return resolved or component_id
+
+
+def _observed_item_key(observed: dict[str, Any]) -> str:
+    if _safe_int(observed.get("itemIndex")) < 0:
+        return ""
+    pointer = str(observed.get("jsonPointer") or "")
+    parts = [part for part in pointer.split("/") if part]
+    return parts[0] if len(parts) >= 2 else ""
 
 
 def _persist_observed_field(

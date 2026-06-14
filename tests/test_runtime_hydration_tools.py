@@ -294,18 +294,39 @@ def _seed_hydratable_endpoint(conn) -> None:
         "type: 'object', kind: 'object', bodyShape: 'object'})"
     )
     conn.execute(
+        "CREATE (:SchemaComponent {component_id: 'central:schemas:Device', "
+        "spec_source: 'central', section: 'schemas', name: 'Device', "
+        "type: 'object', kind: 'object', bodyShape: 'object'})"
+    )
+    conn.execute(
+        "CREATE (:Property {property_id: 'central:schemas:DeviceList#prop:items', "
+        "parent_component_id: 'central:schemas:DeviceList', name: 'items', "
+        "type: 'array', required: false})"
+    )
+    conn.execute(
         "CREATE (:Property {property_id: 'central:schemas:DeviceList#prop:serial', "
         "parent_component_id: 'central:schemas:DeviceList', name: 'serial', "
+        "type: 'string', required: false})"
+    )
+    conn.execute(
+        "CREATE (:Property {property_id: 'central:schemas:Device#prop:serial', "
+        "parent_component_id: 'central:schemas:Device', name: 'serial', "
         "type: 'string', required: false})"
     )
     conn.execute(
         "MATCH (endpoint:ApiEndpoint {endpoint_id: 'GET:/monitoring/v1/devices'}), "
         "(response:Response {response_id: 'response-1'}), "
         "(schema:SchemaComponent {component_id: 'central:schemas:DeviceList'}), "
-        "(prop:Property {property_id: 'central:schemas:DeviceList#prop:serial'}) "
+        "(device:SchemaComponent {component_id: 'central:schemas:Device'}), "
+        "(items:Property {property_id: 'central:schemas:DeviceList#prop:items'}), "
+        "(root_serial:Property {property_id: 'central:schemas:DeviceList#prop:serial'}), "
+        "(device_serial:Property {property_id: 'central:schemas:Device#prop:serial'}) "
         "CREATE (endpoint)-[:HAS_RESPONSE]->(response), "
         "(response)-[:RESPONSE_REFERENCES]->(schema), "
-        "(schema)-[:HAS_PROPERTY]->(prop)"
+        "(schema)-[:HAS_PROPERTY]->(items), "
+        "(schema)-[:HAS_PROPERTY]->(root_serial), "
+        "(items)-[:HAS_ITEM_SCHEMA]->(device), "
+        "(device)-[:HAS_PROPERTY]->(device_serial)"
     )
 
 
@@ -473,6 +494,7 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
         fact_id = materialized["materialized"][0]["fact_id"]
         fact_detail = json.loads(tools["get_runtime_fact"](fact_id=fact_id))
         assert fact_detail["fact"]["identityKey"].startswith("serial=SN")
+        assert fact_detail["fact"]["entityType"] == "Device"
         assert fact_detail["fact"]["confidence"] == "high"
         assert fact_detail["provenance"]["observation_id"] == observation_id
         assert fact_detail["provenance"]["run_id"] == hydrated["run_id"]
