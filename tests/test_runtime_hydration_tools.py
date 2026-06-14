@@ -107,9 +107,9 @@ class FakeHydrationGraph:
         if "PRODUCED_OBSERVATION" in cypher and "HydrationRun" in cypher:
             if (params or {}).get("provider") != "central":
                 return []
-            if (params or {}).get("parameters_json") != '{"limit":"2","offset":"0"}':
+            if 'run.parametersJson = \'{"limit":"2","offset":"0"}\'' not in cypher:
                 return []
-            if (params or {}).get("scope_json") != "{}":
+            if "run.scopeJson = '{}'" not in cypher:
                 return []
             return [
                 {
@@ -390,6 +390,36 @@ class FakeAPIClient:
         }
 
 
+class NestedAPIClient(FakeAPIClient):
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, str] | None = None,
+        json_body: dict | None = None,
+    ) -> dict[str, Any]:
+        self.requests.append(
+            {
+                "method": method,
+                "path": path,
+                "params": params,
+                "json_body": json_body,
+            }
+        )
+        return {
+            "items": [
+                {
+                    "serial": "SN1",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
+                    "status": "Up",
+                    "labels": ["edge", "lab"],
+                    "interfaces": [{"name": "1/1/1", "status": "up"}],
+                    "metadata": {"site": "London", "floor": 3},
+                }
+            ]
+        }
+
+
 class LadybugHydrationGraph:
     is_available = True
 
@@ -649,10 +679,10 @@ def test_plan_runtime_hydration_prefers_fresh_materialized_facts() -> None:
     assert parsed["next_best_action"]["action"] == "use_materialized_facts"
     assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "0"}
     assert plan["materialize_call"]["args"] == {"observation_id": "obs-1"}
-    scoped_queries = [params for cypher, params, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
+    scoped_queries = [cypher for cypher, _, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
     assert scoped_queries
-    assert scoped_queries[-1]["parameters_json"] == '{"limit":"2","offset":"0"}'
-    assert scoped_queries[-1]["scope_json"] == "{}"
+    assert 'run.parametersJson = \'{"limit":"2","offset":"0"}\'' in scoped_queries[-1]
+    assert "run.scopeJson = '{}'" in scoped_queries[-1]
     assert all(read_only is True for _, _, read_only in graph.queries)
     assert graph.executions == []
 
@@ -673,8 +703,8 @@ def test_plan_runtime_hydration_does_not_reuse_different_parameter_scope() -> No
     assert plan["materialized_fact_count"] == 0
     assert plan["recommended_action"]["action"] == "hydrate_endpoint"
     assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "50"}
-    scoped_queries = [params for cypher, params, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
-    assert scoped_queries[-1]["parameters_json"] == '{"limit":"2","offset":"50"}'
+    scoped_queries = [cypher for cypher, _, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
+    assert 'run.parametersJson = \'{"limit":"2","offset":"50"}\'' in scoped_queries[-1]
 
 
 def test_plan_runtime_hydration_explains_missing_path_parameters() -> None:
@@ -783,7 +813,15 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
         _bootstrap_hydration_conn(conn)
         _seed_hydratable_endpoint(conn)
         graph = LadybugHydrationGraph(conn)
-        tools = _make_tools(graph_manager=graph, central_client=FakeAPIClient())
+        tools = _make_tools(graph_manager=graph, central_client=NestedAPIClient())
+
+        before_plan = json.loads(
+            tools["plan_runtime_hydration"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                query_params={"limit": "2"},
+            )
+        )
+        assert before_plan["next_best_action"]["action"] == "hydrate_endpoint"
 
         hydrated = json.loads(
             tools["hydrate_runtime_endpoint"](
@@ -808,14 +846,27 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
             )
         )
         assert detail["observation"]["responseHash"] == hydrated["response_hash"]
-        assert len(detail["objects"]) == 2
-        assert {field["name"] for field in detail["fields"]} >= {"serial"}
+        assert len(detail["objects"]) == 1
+        assert {field["name"] for field in detail["fields"]} >= {
+            "interfaces",
+            "labels",
+            "metadata",
+            "serial",
+        }
         assert any(field["property_id"] for field in detail["fields"])
+
+        after_plan = json.loads(
+            tools["plan_runtime_hydration"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                query_params={"limit": "2"},
+            )
+        )
+        assert after_plan["next_best_action"]["action"] == "materialize_existing_observation"
 
         materialized = json.loads(
             tools["materialize_runtime_facts"](observation_id=observation_id)
         )
-        assert materialized["materialized_count"] == 2
+        assert materialized["materialized_count"] == 1
         fact_id = materialized["materialized"][0]["fact_id"]
         fact_detail = json.loads(tools["get_runtime_fact"](fact_id=fact_id))
         assert fact_detail["fact"]["identityKey"].startswith("serial=SN")
@@ -831,7 +882,7 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
                 provider="central",
             )
         )
-        assert promoted["promoted_count"] == 2
+        assert promoted["promoted_count"] == 1
         entity_id = promoted["entities"][0]["entity_id"]
         entity_detail = json.loads(tools["get_runtime_entity"](entity_id=entity_id))
         assert entity_detail["entity"]["provider"] == "central"
@@ -844,7 +895,7 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
                 "RETURN COUNT(*) AS n"
             ).rows_as_dict()
         )
-        assert rows == [{"n": 2}]
+        assert rows == [{"n": 1}]
 
 
 def test_hydrate_runtime_endpoint_requires_live_client() -> None:

@@ -915,7 +915,7 @@ def _query_candidate_endpoints(
             "RETURN DISTINCT e.endpoint_id AS endpoint_id, e.method AS method, "
             "e.path AS path, e.summary AS summary, e.operationId AS operationId, "
             "e.category AS category, c.spec_source AS sourceProvider "
-            f"ORDER BY e.path LIMIT {limit}",
+            f"ORDER BY path LIMIT {limit}",
             params=params,
             read_only=True,
         )
@@ -1504,27 +1504,31 @@ def _persist_hydration_failure(
     response_bytes: int = 0,
 ) -> str:
     run_id = _new_run_id()
+    parameters_literal = _cypher_string_literal(
+        _stable_json(request_payload.get("query_params") or {})
+    )
+    scope_literal = _cypher_string_literal(
+        _stable_json(request_payload.get("path_params") or {})
+    )
+    error_literal = _cypher_string_literal(error[:1000])
     graph.execute(
         "CREATE (:HydrationRun {run_id: $run_id, provider: $provider, "
         "endpoint_id: $endpoint_id, method: 'GET', path: $path, "
-        "parametersJson: $parameters_json, scopeJson: $scope_json, "
+        f"parametersJson: {parameters_literal}, scopeJson: {scope_literal}, "
         "status: 'error', startedAt: current_timestamp(), "
         "finishedAt: current_timestamp(), durationMs: $duration_ms, "
         "requestHash: $request_hash, responseHash: $response_hash, "
         "responseBytes: $response_bytes, itemCount: 0, "
-        "paginationStyle: 'single_call', error: $error})",
+        f"paginationStyle: 'single_call', error: {error_literal}}})",
         {
             "run_id": run_id,
             "provider": provider,
             "endpoint_id": endpoint["endpoint_id"],
             "path": request_payload.get("path") or endpoint.get("path") or "",
-            "parameters_json": _stable_json(request_payload.get("query_params") or {}),
-            "scope_json": _stable_json(request_payload.get("path_params") or {}),
             "duration_ms": duration_ms,
             "request_hash": _sha256(_stable_json(request_payload)),
             "response_hash": response_hash,
             "response_bytes": response_bytes,
-            "error": error[:1000],
         },
     )
     _link_run_to_endpoint(graph, run_id, endpoint["endpoint_id"])
@@ -1550,10 +1554,17 @@ def _persist_hydration_success(
     observation_id = f"{run_id}:observation"
     component_id = response_root.get("component_id") or ""
     item_count = _item_count(response)
+    parameters_literal = _cypher_string_literal(
+        _stable_json(request_payload.get("query_params") or {})
+    )
+    scope_literal = _cypher_string_literal(
+        _stable_json(request_payload.get("path_params") or {})
+    )
+    raw_json_literal = _cypher_string_literal(raw_json)
     graph.execute(
         "CREATE (:HydrationRun {run_id: $run_id, provider: $provider, "
         "endpoint_id: $endpoint_id, method: 'GET', path: $path, "
-        "parametersJson: $parameters_json, scopeJson: $scope_json, "
+        f"parametersJson: {parameters_literal}, scopeJson: {scope_literal}, "
         "status: 'success', startedAt: current_timestamp(), "
         "finishedAt: current_timestamp(), durationMs: $duration_ms, "
         "requestHash: $request_hash, responseHash: $response_hash, "
@@ -1564,8 +1575,6 @@ def _persist_hydration_success(
             "provider": provider,
             "endpoint_id": endpoint["endpoint_id"],
             "path": request_payload.get("path") or endpoint.get("path") or "",
-            "parameters_json": _stable_json(request_payload.get("query_params") or {}),
-            "scope_json": _stable_json(request_payload.get("path_params") or {}),
             "duration_ms": duration_ms,
             "request_hash": _sha256(_stable_json(request_payload)),
             "response_hash": response_hash,
@@ -1578,7 +1587,7 @@ def _persist_hydration_success(
         "run_id: $run_id, endpoint_id: $endpoint_id, provider: $provider, "
         "observedAt: current_timestamp(), status: 'success', "
         "contentType: 'application/json', rootKind: $root_kind, "
-        "rawJson: $raw_json, responseHash: $response_hash, "
+        f"rawJson: {raw_json_literal}, responseHash: $response_hash, "
         "responseBytes: $response_bytes, itemCount: $item_count, "
         "schema_component_id: $schema_component_id, "
         "staleAfterSeconds: $stale_after_seconds})",
@@ -1588,7 +1597,6 @@ def _persist_hydration_success(
             "endpoint_id": endpoint["endpoint_id"],
             "provider": provider,
             "root_kind": _value_kind(response),
-            "raw_json": raw_json,
             "response_hash": response_hash,
             "response_bytes": response_bytes,
             "item_count": item_count,
@@ -1642,12 +1650,14 @@ def _persist_observed_object(
 ) -> None:
     object_id = f"{observation_id}:object:{index}"
     object_component_id = _resolve_observed_object_component(graph, component_id, observed)
+    identity_literal = _cypher_string_literal(observed["identityJson"])
+    raw_literal = _cypher_string_literal(observed["rawJson"])
     graph.execute(
         "CREATE (:RuntimeObservedObject {object_id: $object_id, "
         "observation_id: $observation_id, endpoint_id: $endpoint_id, "
         "jsonPointer: $json_pointer, schema_component_id: $schema_component_id, "
-        "itemIndex: $item_index, identityJson: $identity_json, "
-        "valueType: $value_type, rawJson: $raw_json})",
+        f"itemIndex: $item_index, identityJson: {identity_literal}, "
+        f"valueType: $value_type, rawJson: {raw_literal}}})",
         {
             "object_id": object_id,
             "observation_id": observation_id,
@@ -1655,9 +1665,7 @@ def _persist_observed_object(
             "json_pointer": observed["jsonPointer"],
             "schema_component_id": object_component_id,
             "item_index": observed.get("itemIndex", -1),
-            "identity_json": observed["identityJson"],
             "value_type": observed["valueType"],
-            "raw_json": observed["rawJson"],
         },
     )
     graph.execute(
@@ -1729,11 +1737,12 @@ def _persist_observed_field(
     field: dict[str, Any],
 ) -> None:
     field_id = f"{object_id}:field:{field_index}"
+    value_literal = _cypher_string_literal(field["valueJson"])
     graph.execute(
         "CREATE (:RuntimeObservedField {field_id: $field_id, "
         "object_id: $object_id, observation_id: $observation_id, "
         "endpoint_id: $endpoint_id, property_id: $property_id, "
-        "name: $name, jsonPointer: $json_pointer, valueJson: $value_json, "
+        f"name: $name, jsonPointer: $json_pointer, valueJson: {value_literal}, "
         "scalarType: $scalar_type})",
         {
             "field_id": field_id,
@@ -1743,7 +1752,6 @@ def _persist_observed_field(
             "property_id": field.get("property_id") or "",
             "name": field["name"],
             "json_pointer": field["jsonPointer"],
-            "value_json": field["valueJson"],
             "scalar_type": field["scalarType"],
         },
     )
@@ -1852,10 +1860,13 @@ def _query_runtime_observations_for_scope(
     path_params: dict[str, Any],
     limit: int,
 ) -> list[dict[str, Any]]:
+    parameters_literal = _cypher_string_literal(_stable_json(query_params or {}))
+    scope_literal = _cypher_string_literal(_stable_json(path_params or {}))
     return graph_manager.query(
         "MATCH (run:HydrationRun)-[:PRODUCED_OBSERVATION]->(obs:RuntimeObservation) "
         "WHERE run.endpoint_id = $endpoint_id AND run.provider = $provider "
-        "AND run.parametersJson = $parameters_json AND run.scopeJson = $scope_json "
+        f"AND run.parametersJson = {parameters_literal} "
+        f"AND run.scopeJson = {scope_literal} "
         "RETURN obs.observation_id AS observation_id, obs.run_id AS run_id, "
         "obs.endpoint_id AS endpoint_id, obs.provider AS provider, "
         "obs.observedAt AS observedAt, obs.status AS status, "
@@ -1867,8 +1878,6 @@ def _query_runtime_observations_for_scope(
         params={
             "endpoint_id": endpoint_id,
             "provider": provider,
-            "parameters_json": _stable_json(query_params or {}),
-            "scope_json": _stable_json(path_params or {}),
         },
         read_only=True,
     )
@@ -1958,11 +1967,12 @@ def _materialize_fact_from_object(
         object_id=str(obj.get("object_id") or ""),
     )
     confidence = _fact_confidence(identity_field, attributes)
+    attributes_literal = _cypher_string_literal(_stable_json(attributes))
     graph.execute(
         "MERGE (fact:RuntimeFact {fact_id: $fact_id}) "
         "SET fact.observation_id = $observation_id, fact.object_id = $object_id, "
         "fact.endpoint_id = $endpoint_id, fact.entityType = $entity_type, "
-        "fact.identityKey = $identity_key, fact.attributesJson = $attributes_json, "
+        f"fact.identityKey = $identity_key, fact.attributesJson = {attributes_literal}, "
         "fact.confidence = $confidence, fact.materializedAt = current_timestamp()",
         {
             "fact_id": fact_id,
@@ -1971,7 +1981,6 @@ def _materialize_fact_from_object(
             "endpoint_id": observation.get("endpoint_id") or obj.get("endpoint_id") or "",
             "entity_type": entity_type,
             "identity_key": identity_key,
-            "attributes_json": _stable_json(attributes),
             "confidence": confidence,
         },
     )
@@ -2209,12 +2218,13 @@ def _upsert_runtime_entity(
     endpoint_id = str(
         latest_fact.get("provenance_endpoint_id") or latest_fact.get("endpoint_id") or ""
     )
+    attributes_literal = _cypher_string_literal(str(latest_fact.get("attributesJson") or "{}"))
     graph.execute(
         "MERGE (entity:RuntimeEntity {entity_id: $entity_id}) "
         "SET entity.provider = $provider, entity.entityType = $entity_type, "
         "entity.identityKey = $identity_key, entity.latestFactId = $latest_fact_id, "
         "entity.latestEndpointId = $latest_endpoint_id, "
-        "entity.attributesJson = $attributes_json, entity.confidence = $confidence, "
+        f"entity.attributesJson = {attributes_literal}, entity.confidence = $confidence, "
         "entity.factCount = $fact_count, "
         "entity.firstMaterializedAt = coalesce(entity.firstMaterializedAt, current_timestamp()), "
         "entity.lastMaterializedAt = current_timestamp(), "
@@ -2226,7 +2236,6 @@ def _upsert_runtime_entity(
             "identity_key": identity_key,
             "latest_fact_id": latest_fact.get("fact_id") or "",
             "latest_endpoint_id": endpoint_id,
-            "attributes_json": latest_fact.get("attributesJson") or "{}",
             "confidence": latest_fact.get("confidence") or "unknown",
             "fact_count": len(facts),
         },
@@ -2505,6 +2514,17 @@ def _new_run_id() -> str:
 
 def _stable_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _cypher_string_literal(value: str) -> str:
+    """Return a safely escaped Cypher string literal.
+
+    LadybugDB can mis-bind STRING parameters that look like JSON objects or
+    arrays. Hydration stores JSON as STRING properties, so internal writes and
+    exact JSON-string comparisons inline those values as escaped literals.
+    """
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
 
 
 def _sha256(value: str) -> str:
