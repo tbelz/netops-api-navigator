@@ -39,6 +39,7 @@ class FakeHydrationGraph:
 
     def __init__(self) -> None:
         self.queries: list[tuple[str, dict[str, Any] | None, bool]] = []
+        self.executions: list[tuple[str, dict[str, Any] | None]] = []
 
     def query(
         self,
@@ -48,7 +49,50 @@ class FakeHydrationGraph:
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         self.queries.append((cypher, params, read_only))
-        if "MATCH (e:ApiEndpoint)" in cypher:
+        if "MATCH (obs:RuntimeObservation" in cypher:
+            return [
+                {
+                    "observation_id": "obs-1",
+                    "run_id": "run-1",
+                    "endpoint_id": "GET:/monitoring/v1/devices",
+                    "provider": "central",
+                    "observedAt": "2026-06-14T10:00:00Z",
+                    "status": "success",
+                    "contentType": "application/json",
+                    "rootKind": "object",
+                    "responseHash": "abc123",
+                    "responseBytes": 200,
+                    "itemCount": 1,
+                    "schema_component_id": "central:schemas:DeviceList",
+                    "staleAfterSeconds": 300,
+                    "rawJson": '{"items":[]}',
+                }
+            ]
+        if "OBSERVED_OBJECT_HAS_FIELD" in cypher:
+            return [
+                {
+                    "field_id": "field-1",
+                    "object_id": "obj-1",
+                    "property_id": "central:schemas:Device#prop:serial",
+                    "name": "serial",
+                    "jsonPointer": "/items/0/serial",
+                    "valueJson": '"SN1"',
+                    "scalarType": "string",
+                }
+            ]
+        if "OBSERVATION_HAS_OBJECT" in cypher and "RuntimeObservedObject" in cypher:
+            return [
+                {
+                    "object_id": "obj-1",
+                    "jsonPointer": "/items/0",
+                    "schema_component_id": "central:schemas:DeviceList",
+                    "itemIndex": 0,
+                    "identityJson": '{"serial":"SN1"}',
+                    "valueType": "object",
+                    "rawJson": '{"serial":"SN1"}',
+                }
+            ]
+        if "ApiEndpoint" in cypher and "RETURN e.endpoint_id" in cypher:
             return [
                 {
                     "endpoint_id": "GET:/monitoring/v1/devices",
@@ -104,19 +148,127 @@ class FakeHydrationGraph:
             ]
         return []
 
+    def execute(
+        self,
+        cypher: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        self.executions.append((cypher, params))
+        return []
+
 
 class UnavailableGraph:
     is_available = False
 
 
-def _make_tools(graph_manager: object | None = None) -> dict[str, object]:
+class FakeAPIClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, Any]] = []
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, str] | None = None,
+        json_body: dict | None = None,
+    ) -> dict[str, Any]:
+        self.requests.append(
+            {
+                "method": method,
+                "path": path,
+                "params": params,
+                "json_body": json_body,
+            }
+        )
+        return {
+            "items": [
+                {"serial": "SN1", "macAddress": "aa:bb:cc:dd:ee:01", "status": "Up"},
+                {"serial": "SN2", "macAddress": "aa:bb:cc:dd:ee:02", "status": "Down"},
+            ]
+        }
+
+
+class LadybugHydrationGraph:
+    is_available = True
+
+    def __init__(self, conn) -> None:
+        self.conn = conn
+
+    def query(
+        self,
+        cypher: str,
+        params: dict[str, Any] | None = None,
+        *,
+        read_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        return list(self.conn.execute(cypher, parameters=params or {}).rows_as_dict())
+
+    def execute(
+        self,
+        cypher: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        return list(self.conn.execute(cypher, parameters=params or {}).rows_as_dict())
+
+
+def _make_tools(
+    graph_manager: object | None = None,
+    central_client: object | None = None,
+) -> dict[str, object]:
     mcp = FastMCP("test-runtime-hydration")
     register_runtime_hydration_tools(
         mcp,
         Settings(runtime_hydration=True),
         graph_manager=graph_manager,
+        central_client=central_client,
     )
     return {tool.name: tool.fn for tool in mcp._tool_manager._tools.values()}
+
+
+def _bootstrap_hydration_conn(conn) -> None:
+    for ddl in (
+        NODE_TABLES
+        + KNOWLEDGE_NODE_TABLES
+        + HYDRATION_NODE_TABLES
+        + REL_TABLES
+        + KNOWLEDGE_REL_TABLES
+        + HYDRATION_REL_TABLES
+    ):
+        conn.execute(ddl.strip())
+
+
+def _seed_hydratable_endpoint(conn) -> None:
+    conn.execute(
+        "CREATE (:ApiEndpoint {endpoint_id: 'GET:/monitoring/v1/devices', "
+        "method: 'GET', path: '/monitoring/v1/devices', summary: '', "
+        "description: '', operationId: '', category: 'Monitoring', "
+        "deprecated: false, parameters: '', requestBody: '', responses: ''})"
+    )
+    conn.execute(
+        "CREATE (:Response {response_id: 'response-1', "
+        "endpoint_id: 'GET:/monitoring/v1/devices', status: '200', "
+        "content_type: 'application/json', "
+        "root_component_ref: 'central:schemas:DeviceList'})"
+    )
+    conn.execute(
+        "CREATE (:SchemaComponent {component_id: 'central:schemas:DeviceList', "
+        "spec_source: 'central', section: 'schemas', name: 'DeviceList', "
+        "type: 'object', kind: 'object', bodyShape: 'object'})"
+    )
+    conn.execute(
+        "CREATE (:Property {property_id: 'central:schemas:DeviceList#prop:serial', "
+        "parent_component_id: 'central:schemas:DeviceList', name: 'serial', "
+        "type: 'string', required: false})"
+    )
+    conn.execute(
+        "MATCH (endpoint:ApiEndpoint {endpoint_id: 'GET:/monitoring/v1/devices'}), "
+        "(response:Response {response_id: 'response-1'}), "
+        "(schema:SchemaComponent {component_id: 'central:schemas:DeviceList'}), "
+        "(prop:Property {property_id: 'central:schemas:DeviceList#prop:serial'}) "
+        "CREATE (endpoint)-[:HAS_RESPONSE]->(response), "
+        "(response)-[:RESPONSE_REFERENCES]->(schema), "
+        "(schema)-[:HAS_PROPERTY]->(prop)"
+    )
 
 
 def test_runtime_hydration_shell_tool_surface() -> None:
@@ -125,6 +277,9 @@ def test_runtime_hydration_shell_tool_surface() -> None:
     assert set(tools) == {
         "get_runtime_hydration_status",
         "list_runtime_hydration_candidates",
+        "hydrate_runtime_endpoint",
+        "list_runtime_observations",
+        "get_runtime_observation",
     }
 
 
@@ -134,19 +289,23 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
     parsed = json.loads(tools["get_runtime_hydration_status"]())
 
     assert parsed["enabled"] is True
-    assert parsed["stage"] == "foundation"
+    assert parsed["stage"] == "executor"
     assert parsed["capabilities"] == [
         "status",
         "list_read_hydration_candidates",
         "generic_observation_schema",
+        "hydrate_read_endpoint",
+        "list_runtime_observations",
+        "get_runtime_observation",
     ]
     assert parsed["implemented"] == {
-        "generic_endpoint_hydration": False,
+        "generic_endpoint_hydration": True,
         "observation_persistence_schema": True,
-        "observation_persistence_runtime": False,
+        "observation_persistence_runtime": True,
         "materialization": False,
     }
     assert parsed["graph_available"] is True
+    assert parsed["clients_available"]["central"] is False
     assert "HydrationRun" in parsed["schema"]["node_tables"]
     assert "RuntimeObservation" in parsed["schema"]["node_tables"]
     assert "CALLED_API" in parsed["schema"]["relationship_tables"]
@@ -188,6 +347,107 @@ def test_list_runtime_hydration_candidates_reports_unavailable_graph() -> None:
         "total": 0,
         "error": "Graph database is unavailable.",
     }
+
+
+def test_hydrate_runtime_endpoint_persists_generic_observation() -> None:
+    graph = FakeHydrationGraph()
+    client = FakeAPIClient()
+    tools = _make_tools(graph_manager=graph, central_client=client)
+
+    parsed = json.loads(
+        tools["hydrate_runtime_endpoint"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            query_params={"limit": "2", "offset": "0"},
+            stale_after_seconds=60,
+        )
+    )
+
+    assert parsed["ok"] is True
+    assert parsed["endpoint_id"] == "GET:/monitoring/v1/devices"
+    assert parsed["item_count"] == 2
+    assert parsed["observed_object_count"] == 2
+    assert parsed["stale_after_seconds"] == 60
+    assert client.requests == [
+        {
+            "method": "GET",
+            "path": "monitoring/v1/devices",
+            "params": {"limit": "2", "offset": "0"},
+            "json_body": None,
+        }
+    ]
+    executed_cypher = "\n".join(cypher for cypher, _ in graph.executions)
+    assert "CREATE (:HydrationRun" in executed_cypher
+    assert "CREATE (:RuntimeObservation" in executed_cypher
+    assert "CREATE (:RuntimeObservedObject" in executed_cypher
+    assert "CREATE (:RuntimeObservedField" in executed_cypher
+    assert "CALLED_API" in executed_cypher
+    assert "PRODUCED_OBSERVATION" in executed_cypher
+
+
+def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
+    with TemporaryDirectory(prefix="runtime_hydration_executor_") as tmp:
+        db = lb.Database(str(Path(tmp) / "graph_db"), max_db_size=256 * 1024 * 1024)
+        conn = lb.Connection(db)
+        _bootstrap_hydration_conn(conn)
+        _seed_hydratable_endpoint(conn)
+        graph = LadybugHydrationGraph(conn)
+        tools = _make_tools(graph_manager=graph, central_client=FakeAPIClient())
+
+        hydrated = json.loads(
+            tools["hydrate_runtime_endpoint"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                query_params={"limit": "2"},
+            )
+        )
+
+        assert hydrated["ok"] is True
+        listed = json.loads(
+            tools["list_runtime_observations"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                include_raw=True,
+            )
+        )
+        assert listed["total"] == 1
+        observation_id = listed["observations"][0]["observation_id"]
+        detail = json.loads(
+            tools["get_runtime_observation"](
+                observation_id=observation_id,
+                include_raw=True,
+            )
+        )
+        assert detail["observation"]["responseHash"] == hydrated["response_hash"]
+        assert len(detail["objects"]) == 2
+        assert {field["name"] for field in detail["fields"]} >= {"serial"}
+        assert any(field["property_id"] for field in detail["fields"])
+
+
+def test_hydrate_runtime_endpoint_requires_live_client() -> None:
+    tools = _make_tools(graph_manager=FakeHydrationGraph())
+
+    with pytest.raises(Exception, match="Central credentials are not configured"):
+        tools["hydrate_runtime_endpoint"](endpoint_id="GET:/monitoring/v1/devices")
+
+
+def test_runtime_observation_lookup_tools_hide_raw_by_default() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph)
+
+    listed = json.loads(
+        tools["list_runtime_observations"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            limit=5,
+        )
+    )
+    assert listed["total"] == 1
+    assert listed["observations"][0]["observation_id"] == "obs-1"
+    assert "rawJson" not in listed["observations"][0]
+
+    detail = json.loads(tools["get_runtime_observation"](observation_id="obs-1"))
+    assert detail["observation"]["observation_id"] == "obs-1"
+    assert detail["objects"][0]["identityJson"] == '{"serial":"SN1"}'
+    assert detail["fields"][0]["name"] == "serial"
+    assert "rawJson" not in detail["observation"]
+    assert "rawJson" not in detail["objects"][0]
 
 
 def test_classifier_marks_parameterized_get_as_needing_scope() -> None:
@@ -277,15 +537,7 @@ def test_runtime_hydration_schema_bootstraps_in_ladybug() -> None:
     with TemporaryDirectory(prefix="runtime_hydration_schema_") as tmp:
         db = lb.Database(str(Path(tmp) / "graph_db"), max_db_size=256 * 1024 * 1024)
         conn = lb.Connection(db)
-        for ddl in (
-            NODE_TABLES
-            + KNOWLEDGE_NODE_TABLES
-            + HYDRATION_NODE_TABLES
-            + REL_TABLES
-            + KNOWLEDGE_REL_TABLES
-            + HYDRATION_REL_TABLES
-        ):
-            conn.execute(ddl.strip())
+        _bootstrap_hydration_conn(conn)
 
         conn.execute(
             "CREATE (:ApiEndpoint {endpoint_id: 'GET:/monitoring/v1/devices', "
