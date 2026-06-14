@@ -510,6 +510,38 @@ required fields without ever materialising a full skeleton.
   path. Lets you go from a CLI/YANG identifier straight to the API
   endpoints that touch it without a multi-hop traversal.
 
+## Runtime Hydration Subgraph
+
+When `MCP_RUNTIME_HYDRATION=true`, the graph can also store live GET
+results. The static API graph answers "what can be called"; runtime
+hydration answers "what has actually been observed". Use
+`hydrate_runtime_graph` to write fresh observations/facts, then
+`query_runtime` to read them with Cypher.
+
+### Runtime nodes
+- `HydrationRun` — one attempted live call: provider, endpoint, params,
+  scope, status, timing, response hash/size, and error.
+- `RuntimeObservation` — raw response snapshot plus freshness metadata.
+- `RuntimeObservedObject` / `RuntimeObservedField` — decomposed response
+  objects and fields, linked back to response schema where known.
+- `RuntimeFact` — generic identity-backed fact materialized from an
+  observed object; not a Central-specific table.
+- `RuntimeEntity` — generic highway over latest facts by provider,
+  entity type, and identity key.
+
+### Runtime relationships
+- `(HydrationRun)-[:CALLED_API]->(ApiEndpoint)`
+- `(HydrationRun)-[:PRODUCED_OBSERVATION]->(RuntimeObservation)`
+- `(RuntimeObservation)-[:OBSERVATION_HAS_OBJECT]->(RuntimeObservedObject)`
+- `(RuntimeObservedObject)-[:OBSERVED_OBJECT_HAS_FIELD]->(RuntimeObservedField)`
+- `(RuntimeObservedField)-[:OBSERVED_FIELD_PROPERTY]->(Property)`
+- `(RuntimeObservation)-[:OBSERVATION_MATERIALIZED_FACT]->(RuntimeFact)`
+- `(RuntimeFact)-[:FACT_FROM_RUN]->(HydrationRun)`
+- `(RuntimeFact)-[:FACT_FROM_API]->(ApiEndpoint)`
+- `(RuntimeFact)-[:FACT_FROM_OBJECT]->(RuntimeObservedObject)`
+- `(RuntimeEntity)-[:ENTITY_FROM_FACT]->(RuntimeFact)`
+- `(RuntimeEntity)-[:ENTITY_FROM_API]->(ApiEndpoint)`
+
 ### Canned API discovery patterns
 
 ```cypher

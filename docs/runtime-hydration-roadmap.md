@@ -1,6 +1,6 @@
 # Runtime Hydration Roadmap
 
-Status: staged implementation; PR 8 generic entity highways added
+Status: staged implementation; graph-first runtime query surface in progress
 
 This roadmap sketches a multi-PR path for adding an opt-in runtime hydration
 layer to the MCP server. It intentionally stays high-level: each stage should
@@ -35,6 +35,9 @@ The long-term system should answer three questions:
 - Prefer visible degradation over silent loss: unsupported endpoints, ambiguous
   identity, missing required params, pagination uncertainty, or stale facts must
   be explicit.
+- Keep graph queries as the primary retrieval interface. Hydration should write
+  live state into the graph, then agents should inspect it through focused graph
+  aliases such as `query_runtime`.
 
 ## Relationship To The Existing API Graph
 
@@ -184,6 +187,16 @@ but also whether the selected provider can be hydrated now, whether stale data
 must be refreshed, and whether more parameters are needed before making a live
 call. These helpers should stay generic and advisory; they should not become a
 curated catalog of Central-specific investigation recipes.
+
+### PR 11: Graph-first runtime UX
+
+- Add `query_runtime` as a focused Cypher alias over hydrated observations,
+  facts, entities, freshness, and provenance.
+- Add one primary write-side command, `hydrate_runtime_graph`, that plans,
+  hydrates when needed, materializes facts, and promotes generic entity
+  highways by default.
+- Keep the lower-level hydration tools as advanced/debug surfaces rather than
+  the normal agent happy path.
 
 ## Non-Goals
 

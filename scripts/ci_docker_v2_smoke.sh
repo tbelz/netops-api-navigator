@@ -195,6 +195,7 @@ expected_tools = {
     "query_api_schema",
     "query_fts",
     "query_topology",
+    "query_runtime",
     "query_yang",
     "get_raw_schema",
     "write_graph",
