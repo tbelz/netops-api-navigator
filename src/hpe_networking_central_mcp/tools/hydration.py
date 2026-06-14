@@ -37,6 +37,8 @@ _MAX_FIELD_LIMIT = 500
 _DEFAULT_FIELD_LIMIT = 200
 _MAX_FACT_LIMIT = 500
 _DEFAULT_FACT_LIMIT = 50
+_MAX_MATERIALIZATION_OBJECT_LIMIT = 5_000
+_DEFAULT_MATERIALIZATION_OBJECT_LIMIT = 1_000
 _DEFAULT_STALE_AFTER_SECONDS = 300
 _MAX_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
@@ -428,6 +430,7 @@ def register_runtime_hydration_tools(
                 indent=2,
             )
         latest = _annotate_observation_freshness(rows[0])
+        latest.pop("rawJson", None)
         return json.dumps(
             {
                 "endpoint_id": endpoint_id.strip(),
@@ -451,6 +454,8 @@ def register_runtime_hydration_tools(
         endpoint_id: str = "",
         provider: str = "",
         limit: int = _DEFAULT_OBSERVATION_LIMIT,
+        object_limit: int = _DEFAULT_MATERIALIZATION_OBJECT_LIMIT,
+        object_offset: int = 0,
     ) -> str:
         """Materialize generic RuntimeFact nodes when observed identity is clear.
 
@@ -462,7 +467,9 @@ def register_runtime_hydration_tools(
         graph = _require_graph(gm)
         if observation_id.strip():
             observation = _query_runtime_observation(graph, observation_id.strip())
-            observations = [observation] if observation else []
+            if not observation:
+                raise ToolError(f"Runtime observation not found: {observation_id.strip()}")
+            observations = [observation]
         else:
             observations = _query_runtime_observations(
                 graph,
@@ -475,17 +482,33 @@ def register_runtime_hydration_tools(
                 ),
             )
 
+        clean_object_limit = _clamp_limit_with_max(
+            object_limit,
+            _DEFAULT_MATERIALIZATION_OBJECT_LIMIT,
+            _MAX_MATERIALIZATION_OBJECT_LIMIT,
+        )
+        clean_object_offset = max(0, _safe_int(object_offset))
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        observations_with_more: list[dict[str, Any]] = []
         for observation in observations:
             if not observation:
                 continue
             objects = _query_runtime_observed_objects(
                 graph,
                 observation["observation_id"],
-                limit=_MAX_OBJECT_LIMIT,
+                limit=clean_object_limit + 1,
+                offset=clean_object_offset,
             )
-            for obj in objects:
+            has_more = len(objects) > clean_object_limit
+            if has_more:
+                observations_with_more.append(
+                    {
+                        "observation_id": observation["observation_id"],
+                        "next_object_offset": clean_object_offset + clean_object_limit,
+                    }
+                )
+            for obj in objects[:clean_object_limit]:
                 fact, reason = _materialize_fact_from_object(graph, observation, obj)
                 if fact:
                     materialized.append(fact)
@@ -504,6 +527,10 @@ def register_runtime_hydration_tools(
                 "materialized_count": len(materialized),
                 "skipped": skipped,
                 "skipped_count": len(skipped),
+                "object_limit": clean_object_limit,
+                "object_offset": clean_object_offset,
+                "has_more_objects": bool(observations_with_more),
+                "next_object_offsets": observations_with_more,
             },
             indent=2,
             default=str,
@@ -536,7 +563,7 @@ def register_runtime_hydration_tools(
     @mcp.tool(
         annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
     )
-    def get_runtime_fact(fact_id: str = "", include_attributes: bool = True) -> str:
+    def get_runtime_fact(fact_id: str = "", include_attributes: bool = False) -> str:
         """Fetch one materialized fact with provenance."""
         graph = _require_graph(gm)
         clean_id = fact_id.strip()
@@ -1200,6 +1227,7 @@ def _query_runtime_observed_objects(
     graph_manager: "GraphManager",
     observation_id: str,
     limit: int,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     return graph_manager.query(
         "MATCH (:RuntimeObservation {observation_id: $observation_id})"
@@ -1208,7 +1236,7 @@ def _query_runtime_observed_objects(
         "obj.schema_component_id AS schema_component_id, obj.itemIndex AS itemIndex, "
         "obj.identityJson AS identityJson, obj.valueType AS valueType, "
         "obj.rawJson AS rawJson "
-        f"ORDER BY obj.itemIndex, obj.jsonPointer LIMIT {limit}",
+        f"ORDER BY obj.itemIndex, obj.jsonPointer SKIP {max(0, offset)} LIMIT {limit}",
         params={"observation_id": observation_id},
         read_only=True,
     )
@@ -1439,7 +1467,7 @@ def _annotate_observation_freshness(row: dict[str, Any]) -> dict[str, Any]:
             if stale_after <= 0
             else datetime.fromtimestamp(stale_at_dt, timezone.utc).isoformat()
         )
-        state = "stale" if stale_after <= 0 or age_seconds > stale_after else "fresh"
+        state = "stale" if stale_after <= 0 or age_seconds >= stale_after else "fresh"
     annotated["freshness"] = {
         "state": state,
         "age_seconds": age_seconds,
