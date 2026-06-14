@@ -49,6 +49,61 @@ class FakeHydrationGraph:
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         self.queries.append((cypher, params, read_only))
+        if (
+            "MATCH (entity:RuntimeEntity {entity_id: $entity_id})"
+            in cypher
+            and "ENTITY_FROM_FACT" not in cypher
+        ):
+            return [
+                {
+                    "entity_id": (params or {}).get("entity_id") or "entity-1",
+                    "provider": "central",
+                    "entityType": "DeviceList",
+                    "identityKey": "serial=SN1",
+                    "latestFactId": "fact-1",
+                    "latestEndpointId": "GET:/monitoring/v1/devices",
+                    "attributesJson": '{"serial":"SN1"}',
+                    "confidence": "high",
+                    "factCount": 1,
+                    "firstMaterializedAt": "2026-06-14T10:01:00Z",
+                    "lastMaterializedAt": "2026-06-14T10:01:00Z",
+                    "promotedAt": "2026-06-14T10:02:00Z",
+                }
+            ]
+        if "MATCH (entity:RuntimeEntity" in cypher and "ENTITY_FROM_FACT" in cypher:
+            return [
+                {
+                    "fact_id": "fact-1",
+                    "observation_id": "obs-1",
+                    "object_id": "obj-1",
+                    "endpoint_id": "GET:/monitoring/v1/devices",
+                    "entityType": "DeviceList",
+                    "identityKey": "serial=SN1",
+                    "confidence": "high",
+                    "materializedAt": "2026-06-14T10:01:00Z",
+                    "provider": "central",
+                    "provenance_run_id": "run-1",
+                    "provenance_endpoint_id": "GET:/monitoring/v1/devices",
+                    "provenance_endpoint_path": "/monitoring/v1/devices",
+                }
+            ]
+        if "MATCH (entity:RuntimeEntity" in cypher:
+            return [
+                {
+                    "entity_id": "entity-1",
+                    "provider": "central",
+                    "entityType": "DeviceList",
+                    "identityKey": "serial=SN1",
+                    "latestFactId": "fact-1",
+                    "latestEndpointId": "GET:/monitoring/v1/devices",
+                    "attributesJson": '{"serial":"SN1"}',
+                    "confidence": "high",
+                    "factCount": 1,
+                    "firstMaterializedAt": "2026-06-14T10:01:00Z",
+                    "lastMaterializedAt": "2026-06-14T10:01:00Z",
+                    "promotedAt": "2026-06-14T10:02:00Z",
+                }
+            ]
         if "PRODUCED_OBSERVATION" in cypher and "HydrationRun" in cypher:
             if (params or {}).get("provider") != "central":
                 return []
@@ -86,6 +141,7 @@ class FakeHydrationGraph:
                     "confidence": "high",
                     "materializedAt": "2026-06-14T10:01:00Z",
                     "attributesJson": '{"serial":"SN1"}',
+                    "provider": "central",
                     "provenance_observation_id": "obs-1",
                     "provenance_object_id": "obj-1",
                     "provenance_run_id": "run-1",
@@ -105,6 +161,7 @@ class FakeHydrationGraph:
                     "confidence": "high",
                     "materializedAt": "2026-06-14T10:01:00Z",
                     "attributesJson": '{"serial":"SN1"}',
+                    "provider": "central",
                 }
             ]
         if (
@@ -455,6 +512,9 @@ def test_runtime_hydration_shell_tool_surface() -> None:
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
+        "promote_runtime_entities",
+        "list_runtime_entities",
+        "get_runtime_entity",
     }
 
 
@@ -464,7 +524,7 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
     parsed = json.loads(tools["get_runtime_hydration_status"]())
 
     assert parsed["enabled"] is True
-    assert parsed["stage"] == "planning"
+    assert parsed["stage"] == "entity_highways"
     assert parsed["capabilities"] == [
         "status",
         "list_read_hydration_candidates",
@@ -478,12 +538,16 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
+        "promote_runtime_entities",
+        "list_runtime_entities",
+        "get_runtime_entity",
     ]
     assert parsed["implemented"] == {
         "generic_endpoint_hydration": True,
         "observation_persistence_schema": True,
         "observation_persistence_runtime": True,
         "materialization": True,
+        "typed_runtime_highways": True,
         "provider_readiness": True,
         "planning_helpers": True,
     }
@@ -901,6 +965,63 @@ def test_runtime_fact_lookup_tools_hide_attributes_by_default() -> None:
     assert detail_with_attributes["fact"]["attributesJson"] == '{"serial":"SN1"}'
 
 
+def test_promote_runtime_entities_writes_generic_entity_highway() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph)
+
+    parsed = json.loads(
+        tools["promote_runtime_entities"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+
+    assert parsed["promoted_count"] == 1
+    assert parsed["fact_count"] == 1
+    entity = parsed["entities"][0]
+    assert entity["entity_id"].startswith("entity:")
+    assert entity["provider"] == "central"
+    assert entity["entityType"] == "DeviceList"
+    assert entity["identityKey"] == "serial=SN1"
+    assert entity["latestFactId"] == "fact-1"
+    executed_cypher = "\n".join(cypher for cypher, _ in graph.executions)
+    assert "MERGE (entity:RuntimeEntity" in executed_cypher
+    assert "ENTITY_FROM_FACT" in executed_cypher
+    assert "ENTITY_FROM_API" in executed_cypher
+    promotion_queries = [
+        params
+        for cypher, params, _ in graph.queries
+        if "MATCH (fact:RuntimeFact)" in cypher and "FACT_FROM_RUN" in cypher
+    ]
+    assert promotion_queries[-1]["provider"] == "central"
+
+
+def test_runtime_entity_lookup_tools_hide_attributes_by_default() -> None:
+    tools = _make_tools(graph_manager=FakeHydrationGraph())
+
+    listed = json.loads(
+        tools["list_runtime_entities"](
+            provider="central",
+            endpoint_id="GET:/monitoring/v1/devices",
+        )
+    )
+    assert listed["total"] == 1
+    assert listed["entities"][0]["entity_id"] == "entity-1"
+    assert "attributesJson" not in listed["entities"][0]
+
+    detail = json.loads(tools["get_runtime_entity"](entity_id="entity-1"))
+    assert detail["entity"]["entity_id"] == "entity-1"
+    assert "attributesJson" not in detail["entity"]
+    assert detail["facts"][0]["fact_id"] == "fact-1"
+    assert detail["facts"][0]["provenance_run_id"] == "run-1"
+    assert detail["facts"][0]["provenance_endpoint_id"] == "GET:/monitoring/v1/devices"
+
+    detail_with_attributes = json.loads(
+        tools["get_runtime_entity"](entity_id="entity-1", include_attributes=True)
+    )
+    assert detail_with_attributes["entity"]["attributesJson"] == '{"serial":"SN1"}'
+
+
 def test_classifier_marks_parameterized_get_as_needing_scope() -> None:
     candidate = classify_hydration_candidate(
         endpoint={
@@ -960,6 +1081,7 @@ def test_runtime_hydration_schema_is_registered_for_introspection() -> None:
         "RuntimeObservedObject",
         "RuntimeObservedField",
         "RuntimeFact",
+        "RuntimeEntity",
     ):
         assert table in node_tables
 
@@ -973,6 +1095,8 @@ def test_runtime_hydration_schema_is_registered_for_introspection() -> None:
         "FACT_FROM_OBJECT",
         "FACT_FROM_RUN",
         "FACT_FROM_API",
+        "ENTITY_FROM_FACT",
+        "ENTITY_FROM_API",
     ):
         assert rel in rel_tables
 
@@ -985,9 +1109,12 @@ def test_runtime_hydration_schema_is_registered_for_introspection() -> None:
     assert ("FACT_FROM_RUN", "RuntimeFact", "HydrationRun") in rel_endpoints
     assert ("FACT_FROM_API", "RuntimeFact", "ApiEndpoint") in rel_endpoints
     assert ("FACT_FROM_OBJECT", "RuntimeFact", "RuntimeObservedObject") in rel_endpoints
+    assert ("ENTITY_FROM_FACT", "RuntimeEntity", "RuntimeFact") in rel_endpoints
+    assert ("ENTITY_FROM_API", "RuntimeEntity", "ApiEndpoint") in rel_endpoints
     assert "rawJson" in node_props["RuntimeObservation"]
     assert "identityJson" in node_props["RuntimeObservedObject"]
     assert "attributesJson" in node_props["RuntimeFact"]
+    assert "latestFactId" in node_props["RuntimeEntity"]
 
 
 def test_runtime_hydration_schema_bootstraps_in_ladybug() -> None:
@@ -1013,17 +1140,33 @@ def test_runtime_hydration_schema_bootstraps_in_ladybug() -> None:
             "status: 'ok', rootKind: 'array', rawJson: '[]'})"
         )
         conn.execute(
+            "CREATE (:RuntimeFact {fact_id: 'fact-1', observation_id: 'obs-1', "
+            "object_id: 'obj-1', endpoint_id: 'GET:/monitoring/v1/devices', "
+            "entityType: 'Device', identityKey: 'serial=SN1', attributesJson: '{}'})"
+        )
+        conn.execute(
+            "CREATE (:RuntimeEntity {entity_id: 'entity-1', provider: 'central', "
+            "entityType: 'Device', identityKey: 'serial=SN1', latestFactId: 'fact-1'})"
+        )
+        conn.execute(
             "MATCH (run:HydrationRun {run_id: 'run-1'}), "
             "(endpoint:ApiEndpoint {endpoint_id: 'GET:/monitoring/v1/devices'}), "
-            "(obs:RuntimeObservation {observation_id: 'obs-1'}) "
+            "(obs:RuntimeObservation {observation_id: 'obs-1'}), "
+            "(fact:RuntimeFact {fact_id: 'fact-1'}), "
+            "(entity:RuntimeEntity {entity_id: 'entity-1'}) "
             "CREATE (run)-[:CALLED_API]->(endpoint), "
-            "(run)-[:PRODUCED_OBSERVATION]->(obs)"
+            "(run)-[:PRODUCED_OBSERVATION]->(obs), "
+            "(obs)-[:OBSERVATION_MATERIALIZED_FACT]->(fact), "
+            "(fact)-[:FACT_FROM_RUN]->(run), "
+            "(fact)-[:FACT_FROM_API]->(endpoint), "
+            "(entity)-[:ENTITY_FROM_FACT]->(fact), "
+            "(entity)-[:ENTITY_FROM_API]->(endpoint)"
         )
 
         rows = list(
             conn.execute(
-                "MATCH (:HydrationRun)-[:PRODUCED_OBSERVATION]->"
-                "(:RuntimeObservation) RETURN COUNT(*) AS n"
+                "MATCH (:RuntimeEntity)-[:ENTITY_FROM_FACT]->(:RuntimeFact) "
+                "RETURN COUNT(*) AS n"
             ).rows_as_dict()
         )
         assert rows == [{"n": 1}]

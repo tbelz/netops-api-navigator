@@ -39,6 +39,8 @@ _MAX_FIELD_LIMIT = 500
 _DEFAULT_FIELD_LIMIT = 200
 _MAX_FACT_LIMIT = 500
 _DEFAULT_FACT_LIMIT = 50
+_MAX_ENTITY_LIMIT = 500
+_DEFAULT_ENTITY_LIMIT = 50
 _MAX_MATERIALIZATION_OBJECT_LIMIT = 5_000
 _DEFAULT_MATERIALIZATION_OBJECT_LIMIT = 1_000
 _DEFAULT_STALE_AFTER_SECONDS = 300
@@ -100,12 +102,12 @@ def register_runtime_hydration_tools(
 
         Runtime hydration is opt-in. The current stage can classify GET
         endpoints, persist observations, report freshness, and materialize
-        generic facts. It does not promote typed runtime highways yet.
+        generic facts and entity highways without Central-specific tables.
         """
         return json.dumps(
             {
                 "enabled": settings.runtime_hydration,
-                "stage": "planning",
+                "stage": "entity_highways",
                 "capabilities": [
                     "status",
                     "list_read_hydration_candidates",
@@ -119,12 +121,16 @@ def register_runtime_hydration_tools(
                     "materialize_runtime_facts",
                     "list_runtime_facts",
                     "get_runtime_fact",
+                    "promote_runtime_entities",
+                    "list_runtime_entities",
+                    "get_runtime_entity",
                 ],
                 "implemented": {
                     "generic_endpoint_hydration": True,
                     "observation_persistence_schema": True,
                     "observation_persistence_runtime": True,
                     "materialization": True,
+                    "typed_runtime_highways": True,
                     "provider_readiness": True,
                     "planning_helpers": True,
                 },
@@ -141,8 +147,9 @@ def register_runtime_hydration_tools(
                 "roadmap": "docs/runtime-hydration-roadmap.md",
                 "message": (
                     "Runtime hydration is enabled. This stage can classify "
-                    "GET endpoints, hydrate a bounded read endpoint, and "
-                    "persist raw runtime observations."
+                    "GET endpoints, hydrate bounded read endpoints, persist "
+                    "raw runtime observations, materialize facts, and promote "
+                    "generic entity highways."
                 ),
             },
             indent=2,
@@ -314,7 +321,8 @@ def register_runtime_hydration_tools(
         This is the first generic executor. It supports GET endpoints only,
         requires any path/query parameters to be supplied explicitly, calls the
         selected provider client, and persists raw response/provenance data
-        back into the graph. It does not materialize typed runtime facts yet.
+        back into the graph. Fact materialization and entity promotion are
+        explicit follow-up steps.
         """
         graph = _require_graph(gm)
         endpoint = _resolve_endpoint(graph, endpoint_id=endpoint_id, path=path)
@@ -694,6 +702,129 @@ def register_runtime_hydration_tools(
         if not include_attributes:
             fact["fact"].pop("attributesJson", None)
         return json.dumps(fact, indent=2, default=str)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    def promote_runtime_entities(
+        endpoint_id: str = "",
+        entity_type: str = "",
+        provider: str = "",
+        limit: int = _DEFAULT_ENTITY_LIMIT,
+    ) -> str:
+        """Promote clear-identity facts into generic RuntimeEntity highways.
+
+        RuntimeEntity is the typed highway layer for the first roadmap cycle:
+        it creates stable, provider-scoped entity nodes keyed by entity type and
+        identity key. It does not create Central-specific device/site/client
+        tables. Provenance remains available through ENTITY_FROM_FACT links to
+        RuntimeFact, which in turn links back to observations, runs, and APIs.
+        """
+        graph = _require_graph(gm)
+        provider_filter = _normalise_provider_filter(provider)
+        facts = _query_runtime_facts_for_entity_promotion(
+            graph,
+            endpoint_id=endpoint_id,
+            entity_type=entity_type,
+            provider=provider_filter,
+            limit=_clamp_limit_with_max(limit, _DEFAULT_ENTITY_LIMIT, _MAX_ENTITY_LIMIT),
+        )
+        groups = _group_facts_for_entity_promotion(facts)
+        promoted: list[dict[str, Any]] = []
+        skipped = []
+        for key, grouped_facts in groups.items():
+            if not grouped_facts:
+                continue
+            provider_key, entity_type_value, identity_key = key
+            if not entity_type_value or not identity_key:
+                skipped.extend(
+                    {
+                        "fact_id": fact.get("fact_id"),
+                        "reason": "identity_or_entity_type_missing",
+                    }
+                    for fact in grouped_facts
+                )
+                continue
+            latest = grouped_facts[0]
+            entity = _upsert_runtime_entity(
+                graph,
+                provider=provider_key,
+                entity_type=entity_type_value,
+                identity_key=identity_key,
+                latest_fact=latest,
+                facts=grouped_facts,
+            )
+            promoted.append(entity)
+
+        return json.dumps(
+            {
+                "entities": promoted,
+                "promoted_count": len(promoted),
+                "skipped": skipped,
+                "skipped_count": len(skipped),
+                "fact_count": len(facts),
+                "note": (
+                    "RuntimeEntity nodes are generic highways over RuntimeFact; "
+                    "they are not provider-specific typed tables."
+                ),
+            },
+            indent=2,
+            default=str,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
+    )
+    def list_runtime_entities(
+        provider: str = "",
+        entity_type: str = "",
+        identity_key: str = "",
+        endpoint_id: str = "",
+        limit: int = _DEFAULT_ENTITY_LIMIT,
+        include_attributes: bool = False,
+    ) -> str:
+        """List generic RuntimeEntity highways without calling live APIs."""
+        graph = _require_graph(gm)
+        entities = _query_runtime_entities(
+            graph,
+            provider=_normalise_provider_filter(provider),
+            entity_type=entity_type,
+            identity_key=identity_key,
+            endpoint_id=endpoint_id,
+            limit=_clamp_limit_with_max(limit, _DEFAULT_ENTITY_LIMIT, _MAX_ENTITY_LIMIT),
+        )
+        if not include_attributes:
+            for entity in entities:
+                entity.pop("attributesJson", None)
+        return json.dumps({"entities": entities, "total": len(entities)}, indent=2, default=str)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
+    )
+    def get_runtime_entity(
+        entity_id: str = "",
+        include_attributes: bool = False,
+        fact_limit: int = _DEFAULT_PLAN_LIMIT,
+    ) -> str:
+        """Fetch one generic RuntimeEntity with fact-level provenance."""
+        graph = _require_graph(gm)
+        clean_id = entity_id.strip()
+        if not clean_id:
+            raise ToolError("entity_id is required.")
+        entity = _query_runtime_entity(
+            graph,
+            clean_id,
+            fact_limit=_clamp_limit_with_max(fact_limit, _DEFAULT_PLAN_LIMIT, _MAX_PLAN_LIMIT),
+        )
+        if not entity:
+            raise ToolError(f"Runtime entity not found: {clean_id}")
+        if not include_attributes:
+            entity["entity"].pop("attributesJson", None)
+        return json.dumps(entity, indent=2, default=str)
 
 
 def classify_hydration_candidate(
@@ -2012,6 +2143,210 @@ def _query_runtime_fact(
     }
 
 
+def _query_runtime_facts_for_entity_promotion(
+    graph_manager: "GraphManager",
+    *,
+    endpoint_id: str,
+    entity_type: str,
+    provider: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    where = []
+    params: dict[str, Any] = {}
+    if endpoint_id.strip():
+        where.append("fact.endpoint_id = $endpoint_id")
+        params["endpoint_id"] = endpoint_id.strip()
+    if entity_type.strip():
+        where.append("fact.entityType = $entity_type")
+        params["entity_type"] = entity_type.strip()
+    if provider.strip():
+        where.append("run.provider = $provider")
+        params["provider"] = provider.strip()
+    where_clause = "WHERE " + " AND ".join(where) + " " if where else ""
+    return graph_manager.query(
+        "MATCH (fact:RuntimeFact) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_RUN]->(run:HydrationRun) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_API]->(endpoint:ApiEndpoint) "
+        f"{where_clause}"
+        "RETURN fact.fact_id AS fact_id, fact.observation_id AS observation_id, "
+        "fact.object_id AS object_id, fact.endpoint_id AS endpoint_id, "
+        "fact.entityType AS entityType, fact.identityKey AS identityKey, "
+        "fact.confidence AS confidence, fact.materializedAt AS materializedAt, "
+        "fact.attributesJson AS attributesJson, run.provider AS provider, "
+        "endpoint.endpoint_id AS provenance_endpoint_id, "
+        "endpoint.path AS provenance_endpoint_path "
+        f"ORDER BY fact.materializedAt DESC LIMIT {limit}",
+        params=params,
+        read_only=True,
+    )
+
+
+def _group_facts_for_entity_promotion(
+    facts: list[dict[str, Any]],
+) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for fact in facts:
+        provider = _normalise_provider_if_known(str(fact.get("provider") or "")) or "unknown"
+        entity_type = str(fact.get("entityType") or "")
+        identity_key = str(fact.get("identityKey") or "")
+        groups.setdefault((provider, entity_type, identity_key), []).append(fact)
+    return groups
+
+
+def _upsert_runtime_entity(
+    graph: "GraphManager",
+    *,
+    provider: str,
+    entity_type: str,
+    identity_key: str,
+    latest_fact: dict[str, Any],
+    facts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    entity_id = _entity_id(provider=provider, entity_type=entity_type, identity_key=identity_key)
+    endpoint_id = str(
+        latest_fact.get("provenance_endpoint_id") or latest_fact.get("endpoint_id") or ""
+    )
+    graph.execute(
+        "MERGE (entity:RuntimeEntity {entity_id: $entity_id}) "
+        "SET entity.provider = $provider, entity.entityType = $entity_type, "
+        "entity.identityKey = $identity_key, entity.latestFactId = $latest_fact_id, "
+        "entity.latestEndpointId = $latest_endpoint_id, "
+        "entity.attributesJson = $attributes_json, entity.confidence = $confidence, "
+        "entity.factCount = $fact_count, "
+        "entity.firstMaterializedAt = current_timestamp(), "
+        "entity.lastMaterializedAt = current_timestamp(), "
+        "entity.promotedAt = current_timestamp()",
+        {
+            "entity_id": entity_id,
+            "provider": provider,
+            "entity_type": entity_type,
+            "identity_key": identity_key,
+            "latest_fact_id": latest_fact.get("fact_id") or "",
+            "latest_endpoint_id": endpoint_id,
+            "attributes_json": latest_fact.get("attributesJson") or "{}",
+            "confidence": latest_fact.get("confidence") or "unknown",
+            "fact_count": len(facts),
+        },
+    )
+    for fact in facts:
+        fact_id = str(fact.get("fact_id") or "")
+        if not fact_id:
+            continue
+        graph.execute(
+            "MATCH (entity:RuntimeEntity {entity_id: $entity_id}), "
+            "(fact:RuntimeFact {fact_id: $fact_id}) "
+            "MERGE (entity)-[:ENTITY_FROM_FACT]->(fact)",
+            {"entity_id": entity_id, "fact_id": fact_id},
+        )
+        fact_endpoint_id = str(
+            fact.get("provenance_endpoint_id") or fact.get("endpoint_id") or ""
+        )
+        if fact_endpoint_id:
+            graph.execute(
+                "MATCH (entity:RuntimeEntity {entity_id: $entity_id}), "
+                "(endpoint:ApiEndpoint {endpoint_id: $endpoint_id}) "
+                "MERGE (entity)-[:ENTITY_FROM_API]->(endpoint)",
+                {"entity_id": entity_id, "endpoint_id": fact_endpoint_id},
+            )
+
+    return {
+        "entity_id": entity_id,
+        "provider": provider,
+        "entityType": entity_type,
+        "identityKey": identity_key,
+        "latestFactId": latest_fact.get("fact_id") or "",
+        "latestEndpointId": endpoint_id,
+        "confidence": latest_fact.get("confidence") or "unknown",
+        "factCount": len(facts),
+    }
+
+
+def _query_runtime_entities(
+    graph_manager: "GraphManager",
+    *,
+    provider: str,
+    entity_type: str,
+    identity_key: str,
+    endpoint_id: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {}
+    where = []
+    match = "MATCH (entity:RuntimeEntity) "
+    if endpoint_id.strip():
+        match = "MATCH (entity:RuntimeEntity)-[:ENTITY_FROM_API]->(endpoint:ApiEndpoint) "
+        where.append("endpoint.endpoint_id = $endpoint_id")
+        params["endpoint_id"] = endpoint_id.strip()
+    if provider.strip():
+        where.append("entity.provider = $provider")
+        params["provider"] = provider.strip()
+    if entity_type.strip():
+        where.append("entity.entityType = $entity_type")
+        params["entity_type"] = entity_type.strip()
+    if identity_key.strip():
+        where.append("entity.identityKey = $identity_key")
+        params["identity_key"] = identity_key.strip()
+    where_clause = "WHERE " + " AND ".join(where) + " " if where else ""
+    return graph_manager.query(
+        match
+        + f"{where_clause}"
+        "RETURN DISTINCT entity.entity_id AS entity_id, entity.provider AS provider, "
+        "entity.entityType AS entityType, entity.identityKey AS identityKey, "
+        "entity.latestFactId AS latestFactId, "
+        "entity.latestEndpointId AS latestEndpointId, "
+        "entity.attributesJson AS attributesJson, entity.confidence AS confidence, "
+        "entity.factCount AS factCount, "
+        "entity.firstMaterializedAt AS firstMaterializedAt, "
+        "entity.lastMaterializedAt AS lastMaterializedAt, "
+        "entity.promotedAt AS promotedAt "
+        f"ORDER BY entity.lastMaterializedAt DESC LIMIT {limit}",
+        params=params,
+        read_only=True,
+    )
+
+
+def _query_runtime_entity(
+    graph_manager: "GraphManager",
+    entity_id: str,
+    *,
+    fact_limit: int,
+) -> dict[str, Any]:
+    entity_rows = graph_manager.query(
+        "MATCH (entity:RuntimeEntity {entity_id: $entity_id}) "
+        "RETURN entity.entity_id AS entity_id, entity.provider AS provider, "
+        "entity.entityType AS entityType, entity.identityKey AS identityKey, "
+        "entity.latestFactId AS latestFactId, "
+        "entity.latestEndpointId AS latestEndpointId, "
+        "entity.attributesJson AS attributesJson, entity.confidence AS confidence, "
+        "entity.factCount AS factCount, "
+        "entity.firstMaterializedAt AS firstMaterializedAt, "
+        "entity.lastMaterializedAt AS lastMaterializedAt, "
+        "entity.promotedAt AS promotedAt "
+        "LIMIT 1",
+        params={"entity_id": entity_id},
+        read_only=True,
+    )
+    if not entity_rows:
+        return {}
+    fact_rows = graph_manager.query(
+        "MATCH (entity:RuntimeEntity {entity_id: $entity_id})"
+        "-[:ENTITY_FROM_FACT]->(fact:RuntimeFact) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_RUN]->(run:HydrationRun) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_API]->(endpoint:ApiEndpoint) "
+        "RETURN fact.fact_id AS fact_id, fact.observation_id AS observation_id, "
+        "fact.object_id AS object_id, fact.endpoint_id AS endpoint_id, "
+        "fact.entityType AS entityType, fact.identityKey AS identityKey, "
+        "fact.confidence AS confidence, fact.materializedAt AS materializedAt, "
+        "run.run_id AS provenance_run_id, run.provider AS provider, "
+        "endpoint.endpoint_id AS provenance_endpoint_id, "
+        "endpoint.path AS provenance_endpoint_path "
+        f"ORDER BY fact.materializedAt DESC LIMIT {fact_limit}",
+        params={"entity_id": entity_id},
+        read_only=True,
+    )
+    return {"entity": entity_rows[0], "facts": fact_rows, "fact_count": len(fact_rows)}
+
+
 def _annotate_observation_freshness(row: dict[str, Any]) -> dict[str, Any]:
     annotated = dict(row)
     observed_at = _coerce_datetime(row.get("observedAt"))
@@ -2293,6 +2628,15 @@ def _fact_id(
         "object_id": object_id,
     }
     return "fact:" + _sha256(_stable_json(payload))
+
+
+def _entity_id(*, provider: str, entity_type: str, identity_key: str) -> str:
+    payload = {
+        "provider": provider,
+        "entity_type": entity_type,
+        "identity_key": identity_key,
+    }
+    return "entity:" + _sha256(_stable_json(payload))
 
 
 def _fact_confidence(identity_field: str, attributes: dict[str, Any]) -> str:

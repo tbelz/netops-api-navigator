@@ -155,6 +155,9 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
+        "promote_runtime_entities",
+        "list_runtime_entities",
+        "get_runtime_entity",
     ):
         assert hydration_tool not in tool_names
 
@@ -239,3 +242,6 @@ def test_server_registers_runtime_hydration_foundation_when_enabled(monkeypatch,
     assert "materialize_runtime_facts" in tool_names
     assert "list_runtime_facts" in tool_names
     assert "get_runtime_fact" in tool_names
+    assert "promote_runtime_entities" in tool_names
+    assert "list_runtime_entities" in tool_names
+    assert "get_runtime_entity" in tool_names
