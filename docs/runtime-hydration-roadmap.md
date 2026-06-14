@@ -151,6 +151,11 @@ live APIs.
 - Every promoted fact must remain traceable to `HydrationRun`, `RuntimeObservation`,
   and `ApiEndpoint`.
 
+PR 7 should land before any typed highway work. The generic fact layer is the
+anti-artisanal checkpoint: if an observed object has clear identity, it should
+be queryable as a `RuntimeFact` even when no Central-specific typed table exists
+yet. Typed highways in PR 8 are optimization paths, not prerequisites for use.
+
 ### PR 9: Agent planning helpers
 
 - Add higher-level helpers that let an agent ask what needs to be hydrated for

@@ -1,10 +1,9 @@
 """Opt-in runtime hydration MCP tools.
 
-Runtime hydration starts as a safe planning and introspection surface. The
-first enabled tools do not call Central APIs. They expose the feature flag,
-generic observation schema readiness, and deterministic read-endpoint
-classification over the existing API graph. Later PRs can reuse this contract
-to execute bounded GET hydration and persist observations.
+Runtime hydration is a generic observation and fact layer on top of the API
+graph. It can classify GET endpoints, execute bounded read hydration when live
+clients are available, persist raw observations with provenance, and
+materialize generic runtime facts when observed identity is clear.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import json
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp.exceptions import ToolError
@@ -35,6 +35,10 @@ _MAX_OBJECT_LIMIT = 100
 _DEFAULT_OBJECT_LIMIT = 25
 _MAX_FIELD_LIMIT = 500
 _DEFAULT_FIELD_LIMIT = 200
+_MAX_FACT_LIMIT = 500
+_DEFAULT_FACT_LIMIT = 50
+_MAX_MATERIALIZATION_OBJECT_LIMIT = 5_000
+_DEFAULT_MATERIALIZATION_OBJECT_LIMIT = 1_000
 _DEFAULT_STALE_AFTER_SECONDS = 300
 _MAX_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
@@ -76,9 +80,9 @@ def register_runtime_hydration_tools(
     def get_runtime_hydration_status() -> str:
         """Report runtime hydration feature status.
 
-        Runtime hydration is opt-in. This foundation stage can classify
-        read-capable endpoints and has graph schema for future observations,
-        but it does not execute live hydration calls yet.
+        Runtime hydration is opt-in. The current stage can classify GET
+        endpoints, persist observations, report freshness, and materialize
+        generic facts. It does not promote typed runtime highways yet.
         """
         return json.dumps(
             {
@@ -91,12 +95,16 @@ def register_runtime_hydration_tools(
                     "hydrate_read_endpoint",
                     "list_runtime_observations",
                     "get_runtime_observation",
+                    "get_runtime_hydration_state",
+                    "materialize_runtime_facts",
+                    "list_runtime_facts",
+                    "get_runtime_fact",
                 ],
                 "implemented": {
                     "generic_endpoint_hydration": True,
                     "observation_persistence_schema": True,
                     "observation_persistence_runtime": True,
-                    "materialization": False,
+                    "materialization": True,
                 },
                 "graph_available": bool(gm is not None and getattr(gm, "is_available", False)),
                 "clients_available": {
@@ -348,6 +356,7 @@ def register_runtime_hydration_tools(
         if not include_raw:
             for row in rows:
                 row.pop("rawJson", None)
+        rows = [_annotate_observation_freshness(row) for row in rows]
         return json.dumps({"observations": rows, "total": len(rows)}, indent=2, default=str)
 
     @mcp.tool(
@@ -381,6 +390,7 @@ def register_runtime_hydration_tools(
             observation.pop("rawJson", None)
             for obj in objects:
                 obj.pop("rawJson", None)
+        observation = _annotate_observation_freshness(observation)
         return json.dumps(
             {
                 "observation": observation,
@@ -390,6 +400,181 @@ def register_runtime_hydration_tools(
             indent=2,
             default=str,
         )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
+    )
+    def get_runtime_hydration_state(
+        endpoint_id: str = "",
+        provider: str = "",
+    ) -> str:
+        """Report whether hydrated state for an endpoint is missing, fresh, or stale."""
+        graph = _require_graph(gm)
+        if not endpoint_id.strip():
+            raise ToolError("endpoint_id is required.")
+        rows = _query_runtime_observations(
+            graph,
+            endpoint_id=endpoint_id.strip(),
+            provider=provider,
+            limit=1,
+        )
+        if not rows:
+            return json.dumps(
+                {
+                    "endpoint_id": endpoint_id.strip(),
+                    "provider": provider,
+                    "state": "missing",
+                    "latest_observation": None,
+                    "message": "No runtime observation has been persisted for this endpoint.",
+                },
+                indent=2,
+            )
+        latest = _annotate_observation_freshness(rows[0])
+        latest.pop("rawJson", None)
+        return json.dumps(
+            {
+                "endpoint_id": endpoint_id.strip(),
+                "provider": provider,
+                "state": latest["freshness"]["state"],
+                "latest_observation": latest,
+            },
+            indent=2,
+            default=str,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    def materialize_runtime_facts(
+        observation_id: str = "",
+        endpoint_id: str = "",
+        provider: str = "",
+        limit: int = _DEFAULT_OBSERVATION_LIMIT,
+        object_limit: int = _DEFAULT_MATERIALIZATION_OBJECT_LIMIT,
+        object_offset: int = 0,
+    ) -> str:
+        """Materialize generic RuntimeFact nodes when observed identity is clear.
+
+        This does not create Central-specific typed tables. It promotes
+        observed objects with clear identity hints into generic facts and
+        preserves edges back to the observation, observed object, hydration run,
+        and source API endpoint.
+        """
+        graph = _require_graph(gm)
+        if observation_id.strip():
+            observation = _query_runtime_observation(graph, observation_id.strip())
+            if not observation:
+                raise ToolError(f"Runtime observation not found: {observation_id.strip()}")
+            observations = [observation]
+        else:
+            observations = _query_runtime_observations(
+                graph,
+                endpoint_id=endpoint_id,
+                provider=provider,
+                limit=_clamp_limit_with_max(
+                    limit,
+                    _DEFAULT_OBSERVATION_LIMIT,
+                    _MAX_OBSERVATION_LIMIT,
+                ),
+            )
+
+        clean_object_limit = _clamp_limit_with_max(
+            object_limit,
+            _DEFAULT_MATERIALIZATION_OBJECT_LIMIT,
+            _MAX_MATERIALIZATION_OBJECT_LIMIT,
+        )
+        clean_object_offset = max(0, _safe_int(object_offset))
+        materialized: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        observations_with_more: list[dict[str, Any]] = []
+        for observation in observations:
+            if not observation:
+                continue
+            objects = _query_runtime_observed_objects(
+                graph,
+                observation["observation_id"],
+                limit=clean_object_limit + 1,
+                offset=clean_object_offset,
+            )
+            has_more = len(objects) > clean_object_limit
+            if has_more:
+                observations_with_more.append(
+                    {
+                        "observation_id": observation["observation_id"],
+                        "next_object_offset": clean_object_offset + clean_object_limit,
+                    }
+                )
+            for obj in objects[:clean_object_limit]:
+                fact, reason = _materialize_fact_from_object(graph, observation, obj)
+                if fact:
+                    materialized.append(fact)
+                else:
+                    skipped.append(
+                        {
+                            "observation_id": observation.get("observation_id"),
+                            "object_id": obj.get("object_id"),
+                            "reason": reason,
+                        }
+                    )
+
+        return json.dumps(
+            {
+                "materialized": materialized,
+                "materialized_count": len(materialized),
+                "skipped": skipped,
+                "skipped_count": len(skipped),
+                "object_limit": clean_object_limit,
+                "object_offset": clean_object_offset,
+                "has_more_objects": bool(observations_with_more),
+                "next_object_offsets": observations_with_more,
+            },
+            indent=2,
+            default=str,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
+    )
+    def list_runtime_facts(
+        endpoint_id: str = "",
+        entity_type: str = "",
+        identity_key: str = "",
+        limit: int = _DEFAULT_FACT_LIMIT,
+        include_attributes: bool = False,
+    ) -> str:
+        """List materialized generic runtime facts without calling live APIs."""
+        graph = _require_graph(gm)
+        facts = _query_runtime_facts(
+            graph,
+            endpoint_id=endpoint_id,
+            entity_type=entity_type,
+            identity_key=identity_key,
+            limit=_clamp_limit_with_max(limit, _DEFAULT_FACT_LIMIT, _MAX_FACT_LIMIT),
+        )
+        if not include_attributes:
+            for fact in facts:
+                fact.pop("attributesJson", None)
+        return json.dumps({"facts": facts, "total": len(facts)}, indent=2, default=str)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False),
+    )
+    def get_runtime_fact(fact_id: str = "", include_attributes: bool = False) -> str:
+        """Fetch one materialized fact with provenance."""
+        graph = _require_graph(gm)
+        clean_id = fact_id.strip()
+        if not clean_id:
+            raise ToolError("fact_id is required.")
+        fact = _query_runtime_fact(graph, clean_id)
+        if not fact:
+            raise ToolError(f"Runtime fact not found: {clean_id}")
+        if not include_attributes:
+            fact["fact"].pop("attributesJson", None)
+        return json.dumps(fact, indent=2, default=str)
 
 
 def classify_hydration_candidate(
@@ -852,6 +1037,7 @@ def _persist_observed_object(
     observed: dict[str, Any],
 ) -> None:
     object_id = f"{observation_id}:object:{index}"
+    object_component_id = _resolve_observed_object_component(graph, component_id, observed)
     graph.execute(
         "CREATE (:RuntimeObservedObject {object_id: $object_id, "
         "observation_id: $observation_id, endpoint_id: $endpoint_id, "
@@ -863,7 +1049,7 @@ def _persist_observed_object(
             "observation_id": observation_id,
             "endpoint_id": endpoint_id,
             "json_pointer": observed["jsonPointer"],
-            "schema_component_id": component_id,
+            "schema_component_id": object_component_id,
             "item_index": observed.get("itemIndex", -1),
             "identity_json": observed["identityJson"],
             "value_type": observed["valueType"],
@@ -876,12 +1062,12 @@ def _persist_observed_object(
         "MERGE (obs)-[:OBSERVATION_HAS_OBJECT]->(obj)",
         {"observation_id": observation_id, "object_id": object_id},
     )
-    if component_id:
+    if object_component_id:
         graph.execute(
             "MATCH (obj:RuntimeObservedObject {object_id: $object_id}), "
             "(schema:SchemaComponent {component_id: $component_id}) "
             "MERGE (obj)-[:OBSERVED_OBJECT_SCHEMA]->(schema)",
-            {"object_id": object_id, "component_id": component_id},
+            {"object_id": object_id, "component_id": object_component_id},
         )
     for field_index, field in enumerate(observed["fields"]):
         _persist_observed_field(
@@ -892,6 +1078,41 @@ def _persist_observed_object(
             field_index=field_index,
             field=field,
         )
+
+
+def _resolve_observed_object_component(
+    graph: "GraphManager",
+    component_id: str,
+    observed: dict[str, Any],
+) -> str:
+    if not component_id:
+        return ""
+    item_key = _observed_item_key(observed)
+    if not item_key:
+        return component_id
+    try:
+        rows = graph.query(
+            "MATCH (root:SchemaComponent {component_id: $component_id})"
+            "-[:HAS_PROPERTY]->(prop:Property {name: $item_key}) "
+            "OPTIONAL MATCH (prop)-[:HAS_ITEM_SCHEMA]->(item:SchemaComponent) "
+            "OPTIONAL MATCH (prop)-[:PROPERTY_OF_TYPE]->(typed:SchemaComponent) "
+            "RETURN coalesce(item.component_id, typed.component_id, '') AS component_id "
+            "LIMIT 1",
+            params={"component_id": component_id, "item_key": item_key},
+            read_only=True,
+        )
+    except Exception:
+        return component_id
+    resolved = str((rows[0] if rows else {}).get("component_id") or "")
+    return resolved or component_id
+
+
+def _observed_item_key(observed: dict[str, Any]) -> str:
+    if _safe_int(observed.get("itemIndex")) < 0:
+        return ""
+    pointer = str(observed.get("jsonPointer") or "")
+    parts = [part for part in pointer.split("/") if part]
+    return parts[0] if len(parts) >= 2 else ""
 
 
 def _persist_observed_field(
@@ -1042,6 +1263,7 @@ def _query_runtime_observed_objects(
     graph_manager: "GraphManager",
     observation_id: str,
     limit: int,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     return graph_manager.query(
         "MATCH (:RuntimeObservation {observation_id: $observation_id})"
@@ -1050,7 +1272,7 @@ def _query_runtime_observed_objects(
         "obj.schema_component_id AS schema_component_id, obj.itemIndex AS itemIndex, "
         "obj.identityJson AS identityJson, obj.valueType AS valueType, "
         "obj.rawJson AS rawJson "
-        f"ORDER BY obj.itemIndex, obj.jsonPointer LIMIT {limit}",
+        f"ORDER BY obj.itemIndex, obj.jsonPointer SKIP {max(0, offset)} LIMIT {limit}",
         params={"observation_id": observation_id},
         read_only=True,
     )
@@ -1073,6 +1295,222 @@ def _query_runtime_observed_fields(
         params={"observation_id": observation_id},
         read_only=True,
     )
+
+
+def _materialize_fact_from_object(
+    graph: "GraphManager",
+    observation: dict[str, Any],
+    obj: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str]:
+    identity = _safe_json_object(obj.get("identityJson"))
+    if not identity:
+        return None, "identity_unknown"
+
+    attributes = _safe_json_object(obj.get("rawJson"))
+    if not attributes:
+        return None, "attributes_not_object"
+
+    identity_key, identity_field = _identity_key(identity)
+    if not identity_key:
+        return None, "identity_ambiguous"
+
+    entity_type = _derive_entity_type(observation, obj)
+    fact_id = _fact_id(
+        endpoint_id=str(observation.get("endpoint_id") or obj.get("endpoint_id") or ""),
+        entity_type=entity_type,
+        identity_key=identity_key,
+        observation_id=str(observation.get("observation_id") or ""),
+        object_id=str(obj.get("object_id") or ""),
+    )
+    confidence = _fact_confidence(identity_field, attributes)
+    graph.execute(
+        "MERGE (fact:RuntimeFact {fact_id: $fact_id}) "
+        "SET fact.observation_id = $observation_id, fact.object_id = $object_id, "
+        "fact.endpoint_id = $endpoint_id, fact.entityType = $entity_type, "
+        "fact.identityKey = $identity_key, fact.attributesJson = $attributes_json, "
+        "fact.confidence = $confidence, fact.materializedAt = current_timestamp()",
+        {
+            "fact_id": fact_id,
+            "observation_id": observation.get("observation_id") or "",
+            "object_id": obj.get("object_id") or "",
+            "endpoint_id": observation.get("endpoint_id") or obj.get("endpoint_id") or "",
+            "entity_type": entity_type,
+            "identity_key": identity_key,
+            "attributes_json": _stable_json(attributes),
+            "confidence": confidence,
+        },
+    )
+    _link_fact_provenance(
+        graph=graph,
+        fact_id=fact_id,
+        observation_id=str(observation.get("observation_id") or ""),
+        object_id=str(obj.get("object_id") or ""),
+        run_id=str(observation.get("run_id") or ""),
+        endpoint_id=str(observation.get("endpoint_id") or obj.get("endpoint_id") or ""),
+    )
+    return (
+        {
+            "fact_id": fact_id,
+            "observation_id": observation.get("observation_id") or "",
+            "object_id": obj.get("object_id") or "",
+            "endpoint_id": observation.get("endpoint_id") or obj.get("endpoint_id") or "",
+            "entityType": entity_type,
+            "identityKey": identity_key,
+            "identityField": identity_field,
+            "confidence": confidence,
+        },
+        "",
+    )
+
+
+def _link_fact_provenance(
+    *,
+    graph: "GraphManager",
+    fact_id: str,
+    observation_id: str,
+    object_id: str,
+    run_id: str,
+    endpoint_id: str,
+) -> None:
+    graph.execute(
+        "MATCH (obs:RuntimeObservation {observation_id: $observation_id}), "
+        "(fact:RuntimeFact {fact_id: $fact_id}) "
+        "MERGE (obs)-[:OBSERVATION_MATERIALIZED_FACT]->(fact)",
+        {"observation_id": observation_id, "fact_id": fact_id},
+    )
+    graph.execute(
+        "MATCH (fact:RuntimeFact {fact_id: $fact_id}), "
+        "(obj:RuntimeObservedObject {object_id: $object_id}) "
+        "MERGE (fact)-[:FACT_FROM_OBJECT]->(obj)",
+        {"fact_id": fact_id, "object_id": object_id},
+    )
+    if run_id:
+        graph.execute(
+            "MATCH (fact:RuntimeFact {fact_id: $fact_id}), "
+            "(run:HydrationRun {run_id: $run_id}) "
+            "MERGE (fact)-[:FACT_FROM_RUN]->(run)",
+            {"fact_id": fact_id, "run_id": run_id},
+        )
+    if endpoint_id:
+        graph.execute(
+            "MATCH (fact:RuntimeFact {fact_id: $fact_id}), "
+            "(endpoint:ApiEndpoint {endpoint_id: $endpoint_id}) "
+            "MERGE (fact)-[:FACT_FROM_API]->(endpoint)",
+            {"fact_id": fact_id, "endpoint_id": endpoint_id},
+        )
+
+
+def _query_runtime_facts(
+    graph_manager: "GraphManager",
+    *,
+    endpoint_id: str,
+    entity_type: str,
+    identity_key: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    where = []
+    params: dict[str, Any] = {}
+    if endpoint_id.strip():
+        where.append("fact.endpoint_id = $endpoint_id")
+        params["endpoint_id"] = endpoint_id.strip()
+    if entity_type.strip():
+        where.append("fact.entityType = $entity_type")
+        params["entity_type"] = entity_type.strip()
+    if identity_key.strip():
+        where.append("fact.identityKey = $identity_key")
+        params["identity_key"] = identity_key.strip()
+    where_clause = "WHERE " + " AND ".join(where) + " " if where else ""
+    return graph_manager.query(
+        "MATCH (fact:RuntimeFact) "
+        f"{where_clause}"
+        "RETURN fact.fact_id AS fact_id, fact.observation_id AS observation_id, "
+        "fact.object_id AS object_id, fact.endpoint_id AS endpoint_id, "
+        "fact.entityType AS entityType, fact.identityKey AS identityKey, "
+        "fact.confidence AS confidence, fact.materializedAt AS materializedAt, "
+        "fact.attributesJson AS attributesJson "
+        f"ORDER BY fact.materializedAt DESC LIMIT {limit}",
+        params=params,
+        read_only=True,
+    )
+
+
+def _query_runtime_fact(
+    graph_manager: "GraphManager",
+    fact_id: str,
+) -> dict[str, Any]:
+    rows = graph_manager.query(
+        "MATCH (fact:RuntimeFact {fact_id: $fact_id}) "
+        "OPTIONAL MATCH (obs:RuntimeObservation)-[:OBSERVATION_MATERIALIZED_FACT]->(fact) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_OBJECT]->(obj:RuntimeObservedObject) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_RUN]->(run:HydrationRun) "
+        "OPTIONAL MATCH (fact)-[:FACT_FROM_API]->(endpoint:ApiEndpoint) "
+        "RETURN fact.fact_id AS fact_id, fact.observation_id AS observation_id, "
+        "fact.object_id AS object_id, fact.endpoint_id AS endpoint_id, "
+        "fact.entityType AS entityType, fact.identityKey AS identityKey, "
+        "fact.confidence AS confidence, fact.materializedAt AS materializedAt, "
+        "fact.attributesJson AS attributesJson, "
+        "obs.observation_id AS provenance_observation_id, "
+        "obj.object_id AS provenance_object_id, "
+        "run.run_id AS provenance_run_id, "
+        "endpoint.endpoint_id AS provenance_endpoint_id, "
+        "endpoint.path AS provenance_endpoint_path "
+        "LIMIT 1",
+        params={"fact_id": fact_id},
+        read_only=True,
+    )
+    if not rows:
+        return {}
+    row = rows[0]
+    fact = {
+        key: row.get(key)
+        for key in (
+            "fact_id",
+            "observation_id",
+            "object_id",
+            "endpoint_id",
+            "entityType",
+            "identityKey",
+            "confidence",
+            "materializedAt",
+            "attributesJson",
+        )
+    }
+    return {
+        "fact": fact,
+        "provenance": {
+            "observation_id": row.get("provenance_observation_id") or row.get("observation_id"),
+            "object_id": row.get("provenance_object_id") or row.get("object_id"),
+            "run_id": row.get("provenance_run_id"),
+            "endpoint_id": row.get("provenance_endpoint_id") or row.get("endpoint_id"),
+            "endpoint_path": row.get("provenance_endpoint_path"),
+        },
+    }
+
+
+def _annotate_observation_freshness(row: dict[str, Any]) -> dict[str, Any]:
+    annotated = dict(row)
+    observed_at = _coerce_datetime(row.get("observedAt"))
+    stale_after = _safe_int(row.get("staleAfterSeconds"))
+    if observed_at is None:
+        state = "unknown"
+        age_seconds = None
+        stale_at = None
+    else:
+        age_seconds = max(0, int((datetime.now(timezone.utc) - observed_at).total_seconds()))
+        stale_at_dt = observed_at if stale_after <= 0 else observed_at.timestamp() + stale_after
+        stale_at = (
+            observed_at.isoformat()
+            if stale_after <= 0
+            else datetime.fromtimestamp(stale_at_dt, timezone.utc).isoformat()
+        )
+        state = "stale" if stale_after <= 0 or age_seconds >= stale_after else "fresh"
+    annotated["freshness"] = {
+        "state": state,
+        "age_seconds": age_seconds,
+        "stale_after_seconds": stale_after,
+        "stale_at": stale_at,
+    }
+    return annotated
 
 
 def _preferred_response_root(responses: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1265,6 +1703,184 @@ def _extract_identity(value: Any) -> dict[str, Any]:
         if actual_key and value.get(actual_key) not in (None, ""):
             identity[str(actual_key)] = value[actual_key]
     return identity
+
+
+def _identity_key(identity: dict[str, Any]) -> tuple[str, str]:
+    priority = [
+        "id",
+        "uuid",
+        "serial",
+        "serialNumber",
+        "serial_number",
+        "mac",
+        "macaddr",
+        "macAddress",
+        "scopeId",
+        "siteId",
+        "deviceGroupId",
+        "name",
+    ]
+    lower_to_actual = {key.lower(): key for key in identity.keys()}
+    for field in priority:
+        actual = lower_to_actual.get(field.lower())
+        if actual and identity.get(actual) not in (None, ""):
+            return f"{actual}={identity[actual]}", actual
+    if len(identity) == 1:
+        key, value = next(iter(identity.items()))
+        return f"{key}={value}", str(key)
+    if identity:
+        return "identityHash=" + _sha256(_stable_json(identity))[:16], "identityHash"
+    return "", ""
+
+
+def _derive_entity_type(observation: dict[str, Any], obj: dict[str, Any]) -> str:
+    schema_id = str(
+        obj.get("schema_component_id")
+        or observation.get("schema_component_id")
+        or ""
+    )
+    if schema_id:
+        tail = schema_id.rsplit(":", 1)[-1].split("#", 1)[0]
+        if tail:
+            return tail
+    endpoint_id = str(observation.get("endpoint_id") or obj.get("endpoint_id") or "")
+    if endpoint_id:
+        path = endpoint_id.split(":", 1)[-1].strip("/")
+        segment = path.rsplit("/", 1)[-1]
+        if segment:
+            return segment
+    return "RuntimeObject"
+
+
+def _fact_id(
+    *,
+    endpoint_id: str,
+    entity_type: str,
+    identity_key: str,
+    observation_id: str,
+    object_id: str,
+) -> str:
+    payload = {
+        "endpoint_id": endpoint_id,
+        "entity_type": entity_type,
+        "identity_key": identity_key,
+        "observation_id": observation_id,
+        "object_id": object_id,
+    }
+    return "fact:" + _sha256(_stable_json(payload))
+
+
+def _fact_confidence(identity_field: str, attributes: dict[str, Any]) -> str:
+    high = {"id", "uuid", "serial", "serialNumber", "mac", "macaddr", "macAddress"}
+    medium = {"serial_number", "scopeId", "siteId", "deviceGroupId", "name"}
+    if identity_field in high:
+        return "high"
+    if identity_field in medium:
+        return "medium"
+    if len(attributes) >= 2:
+        return "medium"
+    return "low"
+
+
+def _safe_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        parsed = _parse_ladybug_map_string(value)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _parse_ladybug_map_string(value: str) -> dict[str, Any]:
+    """Parse Ladybug's flat map string representation as a best-effort fallback."""
+    text = value.strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return {}
+    body = text[1:-1].strip()
+    if not body:
+        return {}
+
+    parsed: dict[str, Any] = {}
+    for item in _split_top_level_map_items(body):
+        if ":" not in item:
+            return {}
+        key, raw = item.split(":", 1)
+        key = key.strip().strip("\"'")
+        if not key:
+            return {}
+        parsed[key] = _parse_ladybug_scalar(raw.strip())
+    return parsed
+
+
+def _split_top_level_map_items(value: str) -> list[str]:
+    items: list[str] = []
+    start = 0
+    depth = 0
+    quote = ""
+    for idx, char in enumerate(value):
+        if quote:
+            if char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            items.append(value[start:idx].strip())
+            start = idx + 1
+    tail = value[start:].strip()
+    if tail:
+        items.append(tail)
+    return items
+
+
+def _parse_ladybug_scalar(value: str) -> Any:
+    clean = value.strip()
+    if clean.startswith("{") and clean.endswith("}"):
+        nested = _parse_ladybug_map_string(clean)
+        if nested:
+            return nested
+    if clean.startswith("[") and clean.endswith("]"):
+        return clean
+    lowered = clean.lower()
+    if lowered == "null":
+        return None
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    try:
+        if "." in clean:
+            return float(clean)
+        return int(clean)
+    except ValueError:
+        return clean.strip("\"'")
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _join_pointer(base: str, token: str) -> str:

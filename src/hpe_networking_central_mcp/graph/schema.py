@@ -469,6 +469,14 @@ HYDRATION_REL_TABLES: list[str] = [
         "CREATE REL TABLE IF NOT EXISTS FACT_FROM_OBJECT "
         "(FROM RuntimeFact TO RuntimeObservedObject)"
     ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS FACT_FROM_RUN "
+        "(FROM RuntimeFact TO HydrationRun)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS FACT_FROM_API "
+        "(FROM RuntimeFact TO ApiEndpoint)"
+    ),
 ]
 
 # ── Helpers for dynamic property lookup (used by error hints) ────────
