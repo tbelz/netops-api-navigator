@@ -171,6 +171,13 @@ yet. Typed highways in PR 8 are optimization paths, not prerequisites for use.
 - Provider-specific logic should live in endpoint classifiers, auth clients, or
   optional materialization rules, not in the core observation/provenance model.
 
+PRs 9-10 can land together because provider readiness is part of useful
+planning: an agent needs to know not only which endpoint can answer a question,
+but also whether the selected provider can be hydrated now, whether stale data
+must be refreshed, and whether more parameters are needed before making a live
+call. These helpers should stay generic and advisory; they should not become a
+curated catalog of Central-specific investigation recipes.
+
 ## Non-Goals
 
 - Do not create a manually curated hydrator for every one of the Central APIs.

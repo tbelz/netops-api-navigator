@@ -253,7 +253,10 @@ GET-only `hydrate_runtime_endpoint` executor that calls a selected endpoint and
 persists raw runtime observations with provenance back to the API graph.
 Runtime observations can be inspected with `list_runtime_observations` and
 `get_runtime_observation`, and clear-identity observations can be promoted into
-generic `RuntimeFact` nodes with `materialize_runtime_facts`. Typed runtime
+generic `RuntimeFact` nodes with `materialize_runtime_facts`. Agents can also
+ask `plan_runtime_hydration` for a read-only plan that combines endpoint
+capability, supplied parameters, provider readiness, existing observations,
+freshness, and materialized facts before making live calls. Typed runtime
 highways remain a roadmap item tracked in
 [docs/runtime-hydration-roadmap.md](docs/runtime-hydration-roadmap.md).
 
@@ -302,8 +305,10 @@ next-step hints.
 
 | Tool | Mode | Purpose |
 | --- | --- | --- |
-| `get_runtime_hydration_status` | `MCP_RUNTIME_HYDRATION=true` | Report the opt-in hydration stage, graph availability, schema tables, and not-yet-implemented runtime capabilities. |
+| `get_runtime_hydration_status` | `MCP_RUNTIME_HYDRATION=true` | Report the opt-in hydration stage, graph availability, provider readiness, and schema tables. |
+| `list_runtime_hydration_providers` | `MCP_RUNTIME_HYDRATION=true` | List supported provider boundaries, aliases, configured status, and hydration client availability. |
 | `list_runtime_hydration_candidates` | `MCP_RUNTIME_HYDRATION=true` | List GET endpoints that can be planned for future generic hydration from the compiled API graph. |
+| `plan_runtime_hydration` | `MCP_RUNTIME_HYDRATION=true` | Plan whether to use facts, materialize observations, hydrate, refresh, configure a provider, or ask for parameters. |
 | `hydrate_runtime_endpoint` | `MCP_RUNTIME_HYDRATION=true` plus credentials | Execute one bounded GET hydration and persist raw observation/provenance nodes. |
 | `list_runtime_observations` | `MCP_RUNTIME_HYDRATION=true` | List previously persisted runtime observations without calling live APIs. |
 | `get_runtime_observation` | `MCP_RUNTIME_HYDRATION=true` | Fetch one observation with observed objects and fields. |

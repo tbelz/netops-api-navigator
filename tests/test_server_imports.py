@@ -150,6 +150,8 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
         "list_runtime_observations",
         "get_runtime_observation",
         "get_runtime_hydration_state",
+        "list_runtime_hydration_providers",
+        "plan_runtime_hydration",
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
@@ -232,6 +234,8 @@ def test_server_registers_runtime_hydration_foundation_when_enabled(monkeypatch,
     assert "list_runtime_observations" in tool_names
     assert "get_runtime_observation" in tool_names
     assert "get_runtime_hydration_state" in tool_names
+    assert "list_runtime_hydration_providers" in tool_names
+    assert "plan_runtime_hydration" in tool_names
     assert "materialize_runtime_facts" in tool_names
     assert "list_runtime_facts" in tool_names
     assert "get_runtime_fact" in tool_names

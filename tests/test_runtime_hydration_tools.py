@@ -49,6 +49,31 @@ class FakeHydrationGraph:
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         self.queries.append((cypher, params, read_only))
+        if "PRODUCED_OBSERVATION" in cypher and "HydrationRun" in cypher:
+            if (params or {}).get("provider") != "central":
+                return []
+            if (params or {}).get("parameters_json") != '{"limit":"2","offset":"0"}':
+                return []
+            if (params or {}).get("scope_json") != "{}":
+                return []
+            return [
+                {
+                    "observation_id": "obs-1",
+                    "run_id": "run-1",
+                    "endpoint_id": "GET:/monitoring/v1/devices",
+                    "provider": "central",
+                    "observedAt": "2026-06-14T10:00:00Z",
+                    "status": "success",
+                    "contentType": "application/json",
+                    "rootKind": "object",
+                    "responseHash": "abc123",
+                    "responseBytes": 200,
+                    "itemCount": 1,
+                    "schema_component_id": "central:schemas:DeviceList",
+                    "staleAfterSeconds": 300,
+                    "rawJson": '{"items":[]}',
+                }
+            ]
         if "MATCH (fact:RuntimeFact" in cypher and "OPTIONAL MATCH" in cypher:
             return [
                 {
@@ -130,7 +155,14 @@ class FakeHydrationGraph:
                     "rawJson": '{"serial":"SN1"}',
                 }
             ]
-        if "ApiEndpoint" in cypher and "RETURN e.endpoint_id" in cypher:
+        if (
+            "ApiEndpoint" in cypher
+            and "e.endpoint_id AS endpoint_id" in cypher
+            and "c.spec_source = $spec_source" in cypher
+            and (params or {}).get("spec_source") != "central"
+        ):
+            return []
+        if "ApiEndpoint" in cypher and "e.endpoint_id AS endpoint_id" in cypher:
             return [
                 {
                     "endpoint_id": "GET:/monitoring/v1/devices",
@@ -199,6 +231,81 @@ class UnavailableGraph:
     is_available = False
 
 
+class FreshPlanningGraph(FakeHydrationGraph):
+    def query(
+        self,
+        cypher: str,
+        params: dict[str, Any] | None = None,
+        *,
+        read_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        rows = super().query(cypher, params=params, read_only=read_only)
+        if "RuntimeObservation" in cypher:
+            for row in rows:
+                row["observedAt"] = "2999-01-01T00:00:00Z"
+                row["staleAfterSeconds"] = 3600
+        return rows
+
+
+class ParameterizedHydrationGraph(FakeHydrationGraph):
+    def query(
+        self,
+        cypher: str,
+        params: dict[str, Any] | None = None,
+        *,
+        read_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        self.queries.append((cypher, params, read_only))
+        if "PRODUCED_OBSERVATION" in cypher and "HydrationRun" in cypher:
+            return []
+        if "MATCH (fact:RuntimeFact" in cypher:
+            return []
+        if "MATCH (obs:RuntimeObservation" in cypher:
+            return []
+        if "ApiEndpoint" in cypher and "e.endpoint_id AS endpoint_id" in cypher:
+            return [
+                {
+                    "endpoint_id": "GET:/monitoring/v1/devices/{serial}",
+                    "method": "GET",
+                    "path": "/monitoring/v1/devices/{serial}",
+                    "summary": "Get device",
+                    "operationId": "getDevice",
+                    "category": "Monitoring",
+                }
+            ]
+        if "HAS_PARAMETER" in cypher:
+            return [
+                {
+                    "name": "serial",
+                    "location": "path",
+                    "required": True,
+                    "type": "string",
+                    "format": "",
+                }
+            ]
+        if "HAS_RESPONSE" in cypher:
+            return [
+                {
+                    "status": "200",
+                    "content_type": "application/json",
+                    "component_id": "central:schemas:Device",
+                    "schema_name": "Device",
+                    "body_shape": "object",
+                    "schema_type": "object",
+                }
+            ]
+        if "HAS_PROPERTY" in cypher:
+            return [
+                {
+                    "name": "serial",
+                    "type": "string",
+                    "parent_component_id": "central:schemas:Device",
+                    "property_id": "central:schemas:Device#prop:serial",
+                }
+            ]
+        return []
+
+
 class FakeAPIClient:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
@@ -252,13 +359,16 @@ class LadybugHydrationGraph:
 def _make_tools(
     graph_manager: object | None = None,
     central_client: object | None = None,
+    greenlake_client: object | None = None,
+    settings: Settings | None = None,
 ) -> dict[str, object]:
     mcp = FastMCP("test-runtime-hydration")
     register_runtime_hydration_tools(
         mcp,
-        Settings(runtime_hydration=True),
+        settings or Settings(runtime_hydration=True),
         graph_manager=graph_manager,
         central_client=central_client,
+        greenlake_client=greenlake_client,
     )
     return {tool.name: tool.fn for tool in mcp._tool_manager._tools.values()}
 
@@ -340,6 +450,8 @@ def test_runtime_hydration_shell_tool_surface() -> None:
         "list_runtime_observations",
         "get_runtime_observation",
         "get_runtime_hydration_state",
+        "list_runtime_hydration_providers",
+        "plan_runtime_hydration",
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
@@ -352,7 +464,7 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
     parsed = json.loads(tools["get_runtime_hydration_status"]())
 
     assert parsed["enabled"] is True
-    assert parsed["stage"] == "executor"
+    assert parsed["stage"] == "planning"
     assert parsed["capabilities"] == [
         "status",
         "list_read_hydration_candidates",
@@ -361,6 +473,8 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
         "list_runtime_observations",
         "get_runtime_observation",
         "get_runtime_hydration_state",
+        "list_runtime_hydration_providers",
+        "plan_runtime_hydration",
         "materialize_runtime_facts",
         "list_runtime_facts",
         "get_runtime_fact",
@@ -370,12 +484,43 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
         "observation_persistence_schema": True,
         "observation_persistence_runtime": True,
         "materialization": True,
+        "provider_readiness": True,
+        "planning_helpers": True,
     }
     assert parsed["graph_available"] is True
     assert parsed["clients_available"]["central"] is False
+    assert parsed["providers"][0]["provider"] == "central"
+    assert parsed["providers"][0]["can_hydrate"] is False
     assert "HydrationRun" in parsed["schema"]["node_tables"]
     assert "RuntimeObservation" in parsed["schema"]["node_tables"]
     assert "CALLED_API" in parsed["schema"]["relationship_tables"]
+
+
+def test_list_runtime_hydration_providers_reports_explicit_boundaries() -> None:
+    tools = _make_tools(
+        graph_manager=FakeHydrationGraph(),
+        central_client=FakeAPIClient(),
+        greenlake_client=FakeAPIClient(),
+        settings=Settings(
+            runtime_hydration=True,
+            central_base_url="https://central.example.test",
+            central_client_id="central-id",
+            central_client_secret="central-secret",
+            glp_client_id="glp-id",
+            glp_client_secret="glp-secret",
+        ),
+    )
+
+    parsed = json.loads(tools["list_runtime_hydration_providers"]())
+
+    assert parsed["default_provider"] == "central"
+    providers = {row["provider"]: row for row in parsed["providers"]}
+    assert providers["central"]["aliases"] == ["central", "aruba", "aruba-central"]
+    assert providers["central"]["configured"] is True
+    assert providers["central"]["can_hydrate"] is True
+    assert providers["greenlake"]["aliases"] == ["greenlake", "glp", "hpe-greenlake"]
+    assert providers["greenlake"]["configured"] is True
+    assert providers["greenlake"]["can_hydrate"] is True
 
 
 def test_list_runtime_hydration_candidates_reads_graph_without_hydrating() -> None:
@@ -414,6 +559,122 @@ def test_list_runtime_hydration_candidates_reports_unavailable_graph() -> None:
         "total": 0,
         "error": "Graph database is unavailable.",
     }
+
+
+def test_plan_runtime_hydration_prefers_fresh_materialized_facts() -> None:
+    graph = FreshPlanningGraph()
+    tools = _make_tools(graph_manager=graph, central_client=FakeAPIClient())
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            question="Which devices are monitored?",
+            search="device",
+            query_params={"limit": "2", "offset": "0"},
+        )
+    )
+
+    assert parsed["provider"] == "central"
+    assert parsed["provider_ready"]["can_hydrate"] is True
+    assert parsed["total"] == 1
+    plan = parsed["plans"][0]
+    assert plan["endpoint"]["endpoint_id"] == "GET:/monitoring/v1/devices"
+    assert plan["candidate"]["execution_shape"] == "collection"
+    assert plan["latest_observation"]["freshness"]["state"] == "fresh"
+    assert plan["materialized_fact_count"] == 1
+    assert plan["recommended_action"]["action"] == "use_materialized_facts"
+    assert parsed["next_best_action"]["action"] == "use_materialized_facts"
+    assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "0"}
+    assert plan["materialize_call"]["args"] == {"observation_id": "obs-1"}
+    scoped_queries = [params for cypher, params, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
+    assert scoped_queries
+    assert scoped_queries[-1]["parameters_json"] == '{"limit":"2","offset":"0"}'
+    assert scoped_queries[-1]["scope_json"] == "{}"
+    assert all(read_only is True for _, _, read_only in graph.queries)
+    assert graph.executions == []
+
+
+def test_plan_runtime_hydration_does_not_reuse_different_parameter_scope() -> None:
+    graph = FreshPlanningGraph()
+    tools = _make_tools(graph_manager=graph, central_client=FakeAPIClient())
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            query_params={"limit": "2", "offset": "50"},
+        )
+    )
+
+    plan = parsed["plans"][0]
+    assert plan["latest_observation"] is None
+    assert plan["materialized_fact_count"] == 0
+    assert plan["recommended_action"]["action"] == "hydrate_endpoint"
+    assert plan["hydrate_call"]["args"]["query_params"] == {"limit": "2", "offset": "50"}
+    scoped_queries = [params for cypher, params, _ in graph.queries if "PRODUCED_OBSERVATION" in cypher]
+    assert scoped_queries[-1]["parameters_json"] == '{"limit":"2","offset":"50"}'
+
+
+def test_plan_runtime_hydration_explains_missing_path_parameters() -> None:
+    graph = ParameterizedHydrationGraph()
+    tools = _make_tools(graph_manager=graph, central_client=FakeAPIClient())
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            endpoint_id="GET:/monitoring/v1/devices/{serial}",
+            provider="aruba-central",
+        )
+    )
+
+    plan = parsed["plans"][0]
+    assert parsed["provider"] == "central"
+    assert plan["candidate"]["execution_shape"] == "parameterized_lookup"
+    assert plan["candidate"]["blockers"] == []
+    assert plan["recommended_action"]["action"] == "ask_for_parameters"
+    assert "serial" in "\n".join(plan["validation_errors"])
+    assert plan["hydrate_call"]["args"]["endpoint_id"] == "GET:/monitoring/v1/devices/{serial}"
+    assert graph.executions == []
+
+
+def test_plan_runtime_hydration_reports_missing_provider_for_unhydrated_endpoint() -> None:
+    graph = ParameterizedHydrationGraph()
+    tools = _make_tools(graph_manager=graph)
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            endpoint_id="GET:/monitoring/v1/devices/{serial}",
+            provider="glp",
+            path_params={"serial": "SN1"},
+        )
+    )
+
+    plan = parsed["plans"][0]
+    assert parsed["provider"] == "greenlake"
+    assert parsed["provider_ready"]["can_hydrate"] is False
+    assert plan["endpoint"]["provider"] == "central"
+    assert plan["validation_errors"] == []
+    assert plan["recommended_action"]["action"] == "select_matching_provider"
+    assert plan["hydrate_call"] is None
+    assert parsed["next_best_action"]["action"] == "select_matching_provider"
+    assert graph.executions == []
+
+
+def test_plan_runtime_hydration_filters_search_results_by_provider() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph, greenlake_client=FakeAPIClient())
+
+    parsed = json.loads(
+        tools["plan_runtime_hydration"](
+            search="device",
+            provider="greenlake",
+        )
+    )
+
+    assert parsed["provider"] == "greenlake"
+    assert parsed["plans"] == []
+    assert parsed["next_best_action"]["action"] == "search_api_graph"
+    provider_queries = [params for cypher, params, _ in graph.queries if "c.spec_source = $spec_source" in cypher]
+    assert provider_queries
+    assert provider_queries[0]["spec_source"] == "glp"
+    assert graph.executions == []
 
 
 def test_hydrate_runtime_endpoint_persists_generic_observation() -> None:
@@ -554,6 +815,38 @@ def test_runtime_hydration_state_reports_missing_and_existing_state() -> None:
     assert "rawJson" not in parsed["latest_observation"]
 
 
+def test_runtime_observation_filters_normalize_provider_aliases() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph)
+
+    json.loads(
+        tools["list_runtime_observations"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+    json.loads(
+        tools["get_runtime_hydration_state"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+    json.loads(
+        tools["materialize_runtime_facts"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+
+    provider_params = [
+        params["provider"]
+        for cypher, params, _ in graph.queries
+        if params and "provider" in params and "RuntimeObservation" in cypher
+    ]
+    assert provider_params
+    assert set(provider_params) == {"central"}
+
+
 def test_materialize_runtime_facts_writes_generic_facts_with_provenance() -> None:
     graph = FakeHydrationGraph()
     tools = _make_tools(graph_manager=graph)
@@ -642,7 +935,7 @@ def test_classifier_marks_parameterized_get_as_needing_scope() -> None:
 
     assert candidate["hydration_candidate"] is True
     assert candidate["execution_shape"] == "parameterized_lookup"
-    assert candidate["blockers"] == ["requires_path_parameters"]
+    assert candidate["blockers"] == []
     assert candidate["required_parameters"] == [
         {
             "name": "serial",
