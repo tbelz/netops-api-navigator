@@ -247,13 +247,12 @@ It does not add `find_api_endpoints`, `get_api_endpoint_context`, or
 
 ### Runtime Hydration Foundation
 
-Set `MCP_RUNTIME_HYDRATION=true` to register the first opt-in runtime
-hydration foundation. This adds `get_runtime_hydration_status` plus
-`list_runtime_hydration_candidates`, a read-only planning tool that classifies
-GET endpoints from the compiled API graph by response shape, parameters,
-pagination hints, and identity hints. It does not call live APIs or persist
-runtime observations yet; generic endpoint execution and observation
-persistence remain roadmap items tracked in
+Set `MCP_RUNTIME_HYDRATION=true` to register the opt-in runtime hydration
+foundation. This adds status and candidate-planning tools plus a bounded
+GET-only `hydrate_runtime_endpoint` executor that calls a selected endpoint and
+persists raw runtime observations with provenance back to the API graph.
+Runtime observations can be inspected with `list_runtime_observations` and
+`get_runtime_observation`. Typed materialization remains a roadmap item tracked in
 [docs/runtime-hydration-roadmap.md](docs/runtime-hydration-roadmap.md).
 
 ## Tool Surface
@@ -303,6 +302,9 @@ next-step hints.
 | --- | --- | --- |
 | `get_runtime_hydration_status` | `MCP_RUNTIME_HYDRATION=true` | Report the opt-in hydration stage, graph availability, schema tables, and not-yet-implemented runtime capabilities. |
 | `list_runtime_hydration_candidates` | `MCP_RUNTIME_HYDRATION=true` | List GET endpoints that can be planned for future generic hydration from the compiled API graph. |
+| `hydrate_runtime_endpoint` | `MCP_RUNTIME_HYDRATION=true` plus credentials | Execute one bounded GET hydration and persist raw observation/provenance nodes. |
+| `list_runtime_observations` | `MCP_RUNTIME_HYDRATION=true` | List previously persisted runtime observations without calling live APIs. |
+| `get_runtime_observation` | `MCP_RUNTIME_HYDRATION=true` | Fetch one observation with observed objects and fields. |
 
 ## Recommended Discovery Flow
 

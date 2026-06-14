@@ -533,8 +533,8 @@ if settings.compiler_tools:
 else:
     logger.info("compiler_tools_disabled", reason="MCP_COMPILER_TOOLS not enabled")
 if settings.runtime_hydration:
-    register_runtime_hydration_tools(mcp, settings, graph_manager)
-    logger.info("runtime_hydration_tools_registered", stage="foundation")
+    register_runtime_hydration_tools(mcp, settings, graph_manager, client, glp_client)
+    logger.info("runtime_hydration_tools_registered", stage="executor")
 else:
     logger.info("runtime_hydration_disabled", reason="MCP_RUNTIME_HYDRATION not enabled")
 register_script_tools(mcp, settings, graph_manager, offline_mode=_offline_mode)

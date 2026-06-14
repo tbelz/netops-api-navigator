@@ -127,6 +127,11 @@ planning metadata that later executor work can rely on.
   whether to hydrate before answering.
 - Keep generic observation access useful even before typed materialization exists.
 
+PRs 5-6 are also good candidates to land together. The executor is only useful
+if an agent can immediately inspect what was observed, while the observation
+query tools stay safe because they read already-persisted data and do not call
+live APIs.
+
 ### PR 7: Generic materialization layer
 
 - Add a deterministic materialization path from observations into queryable
