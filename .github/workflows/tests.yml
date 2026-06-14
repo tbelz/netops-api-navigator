@@ -49,3 +49,6 @@ jobs:
 
       - name: Run v2 compiler smoke profile
         run: bash scripts/ci_docker_v2_smoke.sh hpe-networking-central-mcp:ci "${{ github.repository }}"
+
+      - name: Run runtime hydration smoke profile
+        run: bash scripts/ci_docker_runtime_hydration_smoke.sh hpe-networking-central-mcp:ci "${{ github.repository }}"
