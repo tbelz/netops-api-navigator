@@ -825,9 +825,22 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
         assert fact_detail["provenance"]["run_id"] == hydrated["run_id"]
         assert fact_detail["provenance"]["endpoint_id"] == "GET:/monitoring/v1/devices"
 
+        promoted = json.loads(
+            tools["promote_runtime_entities"](
+                endpoint_id="GET:/monitoring/v1/devices",
+                provider="central",
+            )
+        )
+        assert promoted["promoted_count"] == 2
+        entity_id = promoted["entities"][0]["entity_id"]
+        entity_detail = json.loads(tools["get_runtime_entity"](entity_id=entity_id))
+        assert entity_detail["entity"]["provider"] == "central"
+        assert entity_detail["entity"]["entityType"] == "Device"
+        assert entity_detail["facts"][0]["provenance_run_id"] == hydrated["run_id"]
+
         rows = list(
             conn.execute(
-                "MATCH (:RuntimeFact)-[:FACT_FROM_RUN]->(:HydrationRun) "
+                "MATCH (:RuntimeEntity)-[:ENTITY_FROM_FACT]->(:RuntimeFact) "
                 "RETURN COUNT(*) AS n"
             ).rows_as_dict()
         )

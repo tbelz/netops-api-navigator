@@ -1,6 +1,6 @@
 # Runtime Hydration Roadmap
 
-Status: implemented through staged PRs
+Status: staged implementation; PR 8 generic entity highways added
 
 This roadmap sketches a multi-PR path for adding an opt-in runtime hydration
 layer to the MCP server. It intentionally stays high-level: each stage should

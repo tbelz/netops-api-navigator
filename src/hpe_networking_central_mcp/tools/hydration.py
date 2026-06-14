@@ -2151,23 +2151,26 @@ def _query_runtime_facts_for_entity_promotion(
     provider: str,
     limit: int,
 ) -> list[dict[str, Any]]:
-    where = []
+    fact_where = []
     params: dict[str, Any] = {}
     if endpoint_id.strip():
-        where.append("fact.endpoint_id = $endpoint_id")
+        fact_where.append("fact.endpoint_id = $endpoint_id")
         params["endpoint_id"] = endpoint_id.strip()
     if entity_type.strip():
-        where.append("fact.entityType = $entity_type")
+        fact_where.append("fact.entityType = $entity_type")
         params["entity_type"] = entity_type.strip()
+    fact_where_clause = "WHERE " + " AND ".join(fact_where) + " " if fact_where else ""
+    provider_where_clause = ""
     if provider.strip():
-        where.append("run.provider = $provider")
+        provider_where_clause = "WHERE run.provider = $provider "
         params["provider"] = provider.strip()
-    where_clause = "WHERE " + " AND ".join(where) + " " if where else ""
     return graph_manager.query(
         "MATCH (fact:RuntimeFact) "
+        f"{fact_where_clause}"
         "OPTIONAL MATCH (fact)-[:FACT_FROM_RUN]->(run:HydrationRun) "
+        "WITH fact, run "
+        f"{provider_where_clause}"
         "OPTIONAL MATCH (fact)-[:FACT_FROM_API]->(endpoint:ApiEndpoint) "
-        f"{where_clause}"
         "RETURN fact.fact_id AS fact_id, fact.observation_id AS observation_id, "
         "fact.object_id AS object_id, fact.endpoint_id AS endpoint_id, "
         "fact.entityType AS entityType, fact.identityKey AS identityKey, "
@@ -2213,7 +2216,7 @@ def _upsert_runtime_entity(
         "entity.latestEndpointId = $latest_endpoint_id, "
         "entity.attributesJson = $attributes_json, entity.confidence = $confidence, "
         "entity.factCount = $fact_count, "
-        "entity.firstMaterializedAt = current_timestamp(), "
+        "entity.firstMaterializedAt = coalesce(entity.firstMaterializedAt, current_timestamp()), "
         "entity.lastMaterializedAt = current_timestamp(), "
         "entity.promotedAt = current_timestamp()",
         {
