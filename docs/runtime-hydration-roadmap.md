@@ -49,11 +49,11 @@ direct-only `RuntimeNode -> ApiEndpoint` edge:
 
 ```text
 ApiEndpoint
-  <-[:CALLED]-
-HydratorRun
-  -[:PRODUCED]->
+  <-[:CALLED_API]-
+HydrationRun
+  -[:PRODUCED_OBSERVATION]->
 RuntimeObservation
-  -[:MATERIALIZED_AS]->
+  -[:OBSERVATION_MATERIALIZED_FACT]->
 RuntimeFact or typed runtime node
 ```
 
@@ -62,6 +62,11 @@ parameters, scope, timestamp, pagination, success/failure state, response hash,
 source endpoint, and freshness.
 
 ## Roadmap
+
+Implementation PRs may bundle adjacent roadmap sections when the review cycle
+cost is high. The important boundary is behavioral maturity: each PR should
+ship a coherent, tested slice that keeps runtime hydration disabled unless
+`MCP_RUNTIME_HYDRATION=true` is set.
 
 ### PR 1: Roadmap and terminology
 
@@ -98,6 +103,11 @@ source endpoint, and freshness.
 - Surface unsupported or ambiguous endpoints as explicit capability gaps rather
   than hiding them.
 
+PRs 2-4 are safe to land together as the first implementation slice because
+they do not execute live API calls or persist runtime observations. Together
+they establish the flag, the generic observation schema, and graph-backed
+planning metadata that later executor work can rely on.
+
 ### PR 5: Generic endpoint hydration executor
 
 - Add the first real hydration tool behind the flag. It should hydrate a chosen
@@ -133,7 +143,7 @@ source endpoint, and freshness.
 - Existing seed-backed concepts such as devices, sites, topology, config
   profiles, ports, clients, and radios can become typed highways, but they are
   not the foundation of the system.
-- Every promoted fact must remain traceable to `HydratorRun`, `RuntimeObservation`,
+- Every promoted fact must remain traceable to `HydrationRun`, `RuntimeObservation`,
   and `ApiEndpoint`.
 
 ### PR 9: Agent planning helpers
@@ -175,4 +185,3 @@ The roadmap is complete when the server can, behind an explicit opt-in flag:
   when hydration is disabled;
 - provide enough tests and smoke coverage to prove the hydration substrate works
   across multiple endpoint shapes, not only a hand-picked domain.
-

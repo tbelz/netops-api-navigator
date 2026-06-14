@@ -39,6 +39,7 @@ class Settings:
     knowledge_release_repo: str = ""
     knowledge_projection: str = "legacy"
     compiler_tools: bool = False
+    runtime_hydration: bool = False
     compiler_db_path: Path = field(default_factory=lambda: Path("/data/knowledge_db_compiler"))
     compiler_ast_db_path: Path = field(default_factory=lambda: Path("/data/knowledge_db_ast"))
 
@@ -108,6 +109,7 @@ def load_settings() -> Settings:
         knowledge_release_repo=os.environ.get("KNOWLEDGE_RELEASE_REPO", "").strip(),
         knowledge_projection=knowledge_projection,
         compiler_tools=_parse_bool(os.environ.get("MCP_COMPILER_TOOLS", "")),
+        runtime_hydration=_parse_bool(os.environ.get("MCP_RUNTIME_HYDRATION", "")),
         compiler_db_path=Path(
             os.environ.get("MCP_COMPILER_DB_PATH", str(default_compiler_db_path))
         ),

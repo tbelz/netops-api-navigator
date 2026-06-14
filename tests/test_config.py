@@ -15,6 +15,7 @@ def test_compiler_tool_settings_default_to_disabled_sidecars(monkeypatch, tmp_pa
     graph_db_path = tmp_path / "graph_db"
     monkeypatch.setenv("GRAPH_DB_PATH", str(graph_db_path))
     monkeypatch.delenv("MCP_COMPILER_TOOLS", raising=False)
+    monkeypatch.delenv("MCP_RUNTIME_HYDRATION", raising=False)
     monkeypatch.delenv("MCP_COMPILER_DB_PATH", raising=False)
     monkeypatch.delenv("MCP_COMPILER_AST_DB_PATH", raising=False)
     monkeypatch.delenv("MCP_KNOWLEDGE_PROJECTION", raising=False)
@@ -23,6 +24,7 @@ def test_compiler_tool_settings_default_to_disabled_sidecars(monkeypatch, tmp_pa
     settings = load_settings()
 
     assert settings.compiler_tools is False
+    assert settings.runtime_hydration is False
     assert settings.compiler_db_path == tmp_path / "knowledge_db_compiler"
     assert settings.compiler_ast_db_path == tmp_path / "knowledge_db_ast"
 
@@ -49,3 +51,19 @@ def test_compiler_tool_settings_accept_explicit_overrides(monkeypatch, tmp_path)
     assert settings.compiler_tools is True
     assert settings.compiler_db_path == Path(tmp_path / "compiler")
     assert settings.compiler_ast_db_path == Path(tmp_path / "ast")
+
+
+def test_runtime_hydration_defaults_to_disabled(monkeypatch):
+    monkeypatch.delenv("MCP_RUNTIME_HYDRATION", raising=False)
+
+    settings = load_settings()
+
+    assert settings.runtime_hydration is False
+
+
+def test_runtime_hydration_accepts_truthy_flag(monkeypatch):
+    monkeypatch.setenv("MCP_RUNTIME_HYDRATION", "true")
+
+    settings = load_settings()
+
+    assert settings.runtime_hydration is True
