@@ -252,7 +252,9 @@ foundation. This adds status and candidate-planning tools plus a bounded
 GET-only `hydrate_runtime_endpoint` executor that calls a selected endpoint and
 persists raw runtime observations with provenance back to the API graph.
 Runtime observations can be inspected with `list_runtime_observations` and
-`get_runtime_observation`. Typed materialization remains a roadmap item tracked in
+`get_runtime_observation`, and clear-identity observations can be promoted into
+generic `RuntimeFact` nodes with `materialize_runtime_facts`. Typed runtime
+highways remain a roadmap item tracked in
 [docs/runtime-hydration-roadmap.md](docs/runtime-hydration-roadmap.md).
 
 ## Tool Surface
@@ -305,6 +307,10 @@ next-step hints.
 | `hydrate_runtime_endpoint` | `MCP_RUNTIME_HYDRATION=true` plus credentials | Execute one bounded GET hydration and persist raw observation/provenance nodes. |
 | `list_runtime_observations` | `MCP_RUNTIME_HYDRATION=true` | List previously persisted runtime observations without calling live APIs. |
 | `get_runtime_observation` | `MCP_RUNTIME_HYDRATION=true` | Fetch one observation with observed objects and fields. |
+| `get_runtime_hydration_state` | `MCP_RUNTIME_HYDRATION=true` | Report whether hydrated state for an endpoint is missing, fresh, stale, or unknown. |
+| `materialize_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | Promote observed objects with clear identity into generic `RuntimeFact` nodes. |
+| `list_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | List materialized facts by endpoint, entity type, or identity key. |
+| `get_runtime_fact` | `MCP_RUNTIME_HYDRATION=true` | Fetch one materialized fact with provenance back to observation, run, and endpoint. |
 
 ## Recommended Discovery Flow
 

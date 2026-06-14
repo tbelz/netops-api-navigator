@@ -149,6 +149,10 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
         "hydrate_runtime_endpoint",
         "list_runtime_observations",
         "get_runtime_observation",
+        "get_runtime_hydration_state",
+        "materialize_runtime_facts",
+        "list_runtime_facts",
+        "get_runtime_fact",
     ):
         assert hydration_tool not in tool_names
 
@@ -227,3 +231,7 @@ def test_server_registers_runtime_hydration_foundation_when_enabled(monkeypatch,
     assert "hydrate_runtime_endpoint" in tool_names
     assert "list_runtime_observations" in tool_names
     assert "get_runtime_observation" in tool_names
+    assert "get_runtime_hydration_state" in tool_names
+    assert "materialize_runtime_facts" in tool_names
+    assert "list_runtime_facts" in tool_names
+    assert "get_runtime_fact" in tool_names

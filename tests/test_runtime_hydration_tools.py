@@ -49,6 +49,39 @@ class FakeHydrationGraph:
         read_only: bool = True,
     ) -> list[dict[str, Any]]:
         self.queries.append((cypher, params, read_only))
+        if "MATCH (fact:RuntimeFact" in cypher and "OPTIONAL MATCH" in cypher:
+            return [
+                {
+                    "fact_id": "fact-1",
+                    "observation_id": "obs-1",
+                    "object_id": "obj-1",
+                    "endpoint_id": "GET:/monitoring/v1/devices",
+                    "entityType": "DeviceList",
+                    "identityKey": "serial=SN1",
+                    "confidence": "high",
+                    "materializedAt": "2026-06-14T10:01:00Z",
+                    "attributesJson": '{"serial":"SN1"}',
+                    "provenance_observation_id": "obs-1",
+                    "provenance_object_id": "obj-1",
+                    "provenance_run_id": "run-1",
+                    "provenance_endpoint_id": "GET:/monitoring/v1/devices",
+                    "provenance_endpoint_path": "/monitoring/v1/devices",
+                }
+            ]
+        if "MATCH (fact:RuntimeFact" in cypher:
+            return [
+                {
+                    "fact_id": "fact-1",
+                    "observation_id": "obs-1",
+                    "object_id": "obj-1",
+                    "endpoint_id": "GET:/monitoring/v1/devices",
+                    "entityType": "DeviceList",
+                    "identityKey": "serial=SN1",
+                    "confidence": "high",
+                    "materializedAt": "2026-06-14T10:01:00Z",
+                    "attributesJson": '{"serial":"SN1"}',
+                }
+            ]
         if "MATCH (obs:RuntimeObservation" in cypher:
             return [
                 {
@@ -280,6 +313,10 @@ def test_runtime_hydration_shell_tool_surface() -> None:
         "hydrate_runtime_endpoint",
         "list_runtime_observations",
         "get_runtime_observation",
+        "get_runtime_hydration_state",
+        "materialize_runtime_facts",
+        "list_runtime_facts",
+        "get_runtime_fact",
     }
 
 
@@ -297,12 +334,16 @@ def test_runtime_hydration_status_is_honest_about_unimplemented_capabilities() -
         "hydrate_read_endpoint",
         "list_runtime_observations",
         "get_runtime_observation",
+        "get_runtime_hydration_state",
+        "materialize_runtime_facts",
+        "list_runtime_facts",
+        "get_runtime_fact",
     ]
     assert parsed["implemented"] == {
         "generic_endpoint_hydration": True,
         "observation_persistence_schema": True,
         "observation_persistence_runtime": True,
-        "materialization": False,
+        "materialization": True,
     }
     assert parsed["graph_available"] is True
     assert parsed["clients_available"]["central"] is False
@@ -420,6 +461,26 @@ def test_hydrate_runtime_endpoint_persists_to_ladybug_graph() -> None:
         assert {field["name"] for field in detail["fields"]} >= {"serial"}
         assert any(field["property_id"] for field in detail["fields"])
 
+        materialized = json.loads(
+            tools["materialize_runtime_facts"](observation_id=observation_id)
+        )
+        assert materialized["materialized_count"] == 2
+        fact_id = materialized["materialized"][0]["fact_id"]
+        fact_detail = json.loads(tools["get_runtime_fact"](fact_id=fact_id))
+        assert fact_detail["fact"]["identityKey"].startswith("serial=SN")
+        assert fact_detail["fact"]["confidence"] == "high"
+        assert fact_detail["provenance"]["observation_id"] == observation_id
+        assert fact_detail["provenance"]["run_id"] == hydrated["run_id"]
+        assert fact_detail["provenance"]["endpoint_id"] == "GET:/monitoring/v1/devices"
+
+        rows = list(
+            conn.execute(
+                "MATCH (:RuntimeFact)-[:FACT_FROM_RUN]->(:HydrationRun) "
+                "RETURN COUNT(*) AS n"
+            ).rows_as_dict()
+        )
+        assert rows == [{"n": 2}]
+
 
 def test_hydrate_runtime_endpoint_requires_live_client() -> None:
     tools = _make_tools(graph_manager=FakeHydrationGraph())
@@ -448,6 +509,57 @@ def test_runtime_observation_lookup_tools_hide_raw_by_default() -> None:
     assert detail["fields"][0]["name"] == "serial"
     assert "rawJson" not in detail["observation"]
     assert "rawJson" not in detail["objects"][0]
+
+
+def test_runtime_hydration_state_reports_missing_and_existing_state() -> None:
+    missing_tools = _make_tools(graph_manager=UnavailableGraph())
+    with pytest.raises(Exception, match="Graph database is unavailable"):
+        missing_tools["get_runtime_hydration_state"](endpoint_id="GET:/monitoring/v1/devices")
+
+    tools = _make_tools(graph_manager=FakeHydrationGraph())
+    parsed = json.loads(
+        tools["get_runtime_hydration_state"](endpoint_id="GET:/monitoring/v1/devices")
+    )
+
+    assert parsed["endpoint_id"] == "GET:/monitoring/v1/devices"
+    assert parsed["state"] in {"fresh", "stale", "unknown"}
+    assert parsed["latest_observation"]["freshness"]["state"] == parsed["state"]
+
+
+def test_materialize_runtime_facts_writes_generic_facts_with_provenance() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph)
+
+    parsed = json.loads(tools["materialize_runtime_facts"](observation_id="obs-1"))
+
+    assert parsed["materialized_count"] == 1
+    fact = parsed["materialized"][0]
+    assert fact["endpoint_id"] == "GET:/monitoring/v1/devices"
+    assert fact["identityKey"] == "serial=SN1"
+    assert fact["confidence"] == "high"
+    executed_cypher = "\n".join(cypher for cypher, _ in graph.executions)
+    assert "MERGE (fact:RuntimeFact" in executed_cypher
+    assert "OBSERVATION_MATERIALIZED_FACT" in executed_cypher
+    assert "FACT_FROM_OBJECT" in executed_cypher
+    assert "FACT_FROM_RUN" in executed_cypher
+    assert "FACT_FROM_API" in executed_cypher
+
+
+def test_runtime_fact_lookup_tools_hide_attributes_by_default() -> None:
+    tools = _make_tools(graph_manager=FakeHydrationGraph())
+
+    listed = json.loads(
+        tools["list_runtime_facts"](endpoint_id="GET:/monitoring/v1/devices")
+    )
+    assert listed["total"] == 1
+    assert listed["facts"][0]["fact_id"] == "fact-1"
+    assert "attributesJson" not in listed["facts"][0]
+
+    detail = json.loads(tools["get_runtime_fact"](fact_id="fact-1"))
+    assert detail["fact"]["fact_id"] == "fact-1"
+    assert detail["provenance"]["observation_id"] == "obs-1"
+    assert detail["provenance"]["run_id"] == "run-1"
+    assert detail["provenance"]["endpoint_id"] == "GET:/monitoring/v1/devices"
 
 
 def test_classifier_marks_parameterized_get_as_needing_scope() -> None:
@@ -519,6 +631,9 @@ def test_runtime_hydration_schema_is_registered_for_introspection() -> None:
         "OBSERVED_OBJECT_HAS_FIELD",
         "OBSERVED_FIELD_PROPERTY",
         "OBSERVATION_MATERIALIZED_FACT",
+        "FACT_FROM_OBJECT",
+        "FACT_FROM_RUN",
+        "FACT_FROM_API",
     ):
         assert rel in rel_tables
 
@@ -528,6 +643,8 @@ def test_runtime_hydration_schema_is_registered_for_introspection() -> None:
         "RuntimeObservedField",
         "Property",
     ) in rel_endpoints
+    assert ("FACT_FROM_RUN", "RuntimeFact", "HydrationRun") in rel_endpoints
+    assert ("FACT_FROM_API", "RuntimeFact", "ApiEndpoint") in rel_endpoints
     assert "rawJson" in node_props["RuntimeObservation"]
     assert "identityJson" in node_props["RuntimeObservedObject"]
     assert "attributesJson" in node_props["RuntimeFact"]
