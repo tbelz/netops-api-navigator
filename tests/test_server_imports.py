@@ -34,6 +34,7 @@ def test_server_module_imports_cleanly(monkeypatch, tmp_path):
         "MCP_COMPILER_TOOLS",
         "MCP_COMPILER_DB_PATH",
         "MCP_COMPILER_AST_DB_PATH",
+        "MCP_RUNTIME_HYDRATION",
         "MCP_KNOWLEDGE_PROJECTION",
         "KNOWLEDGE_PROJECTION",
     ):
@@ -97,6 +98,7 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
         "MCP_COMPILER_TOOLS",
         "MCP_COMPILER_DB_PATH",
         "MCP_COMPILER_AST_DB_PATH",
+        "MCP_RUNTIME_HYDRATION",
         "MCP_KNOWLEDGE_PROJECTION",
         "KNOWLEDGE_PROJECTION",
     ):
@@ -141,6 +143,7 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
         "get_compiler_graph_health",
     ):
         assert compiler_only not in tool_names
+    assert "get_runtime_hydration_status" not in tool_names
 
 
 def test_server_registers_compiler_tools_when_enabled(monkeypatch, tmp_path):
@@ -181,3 +184,35 @@ def test_server_registers_compiler_tools_when_enabled(monkeypatch, tmp_path):
         "get_api_schema_context",
     ):
         assert removed_tool not in tool_names
+
+
+def test_server_registers_runtime_hydration_status_when_enabled(monkeypatch, tmp_path):
+    """Runtime hydration is opt-in and starts as an inert status shell."""
+    for var in (
+        "CENTRAL_BASE_URL",
+        "CENTRAL_CLIENT_ID",
+        "CENTRAL_CLIENT_SECRET",
+        "GREENLAKE_CLIENT_ID",
+        "GREENLAKE_CLIENT_SECRET",
+        "READ_ONLY",
+        "MCP_COMPILER_TOOLS",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("SCRIPT_LIBRARY_PATH", str(tmp_path / "scripts"))
+    monkeypatch.setenv("GRAPH_DB_PATH", str(tmp_path / "graph.db"))
+    monkeypatch.setenv("KNOWLEDGE_RELEASE_REPO", "")
+    monkeypatch.setenv("MCP_RUNTIME_HYDRATION", "true")
+
+    _prev = sys.modules.get("hpe_networking_central_mcp.server")
+    if _prev is not None:
+        _ipc = getattr(_prev, "ipc_server", None)
+        if _ipc is not None:
+            _ipc.stop()
+    sys.modules.pop("hpe_networking_central_mcp.server", None)
+
+    module = importlib.import_module("hpe_networking_central_mcp.server")
+
+    tool_mgr = getattr(module.mcp, "_tool_manager", None)
+    assert tool_mgr is not None, "FastMCP changed tool-manager attribute name"
+    tool_names = {t.name for t in tool_mgr._tools.values()}
+    assert "get_runtime_hydration_status" in tool_names

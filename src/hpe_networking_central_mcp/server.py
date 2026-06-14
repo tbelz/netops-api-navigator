@@ -31,6 +31,7 @@ from .tools.api_call import register_api_call_tools, register_greenlake_api_call
 from .tools.compiler import register_compiler_tools
 from .tools.execution import register_execution_tools, _run_script
 from .tools.graph import register_graph_tools
+from .tools.hydration import register_runtime_hydration_tools
 from .tools.scripts import register_script_tools, sync_seeds_to_graph
 
 logger = setup_logging()
@@ -531,6 +532,11 @@ if settings.compiler_tools:
     )
 else:
     logger.info("compiler_tools_disabled", reason="MCP_COMPILER_TOOLS not enabled")
+if settings.runtime_hydration:
+    register_runtime_hydration_tools(mcp, settings)
+    logger.info("runtime_hydration_tools_registered", stage="flag_shell")
+else:
+    logger.info("runtime_hydration_disabled", reason="MCP_RUNTIME_HYDRATION not enabled")
 register_script_tools(mcp, settings, graph_manager, offline_mode=_offline_mode)
 if _offline_mode:
     logger.info(

@@ -166,6 +166,7 @@ GREENLAKE_CLIENT_SECRET=your_glp_client_secret
 | `GRAPH_DB_PATH` | No | `/data/graph_db` | Runtime LadybugDB graph path |
 | `MCP_KNOWLEDGE_PROJECTION` | No | `legacy` | Runtime projection: `legacy`, `v2`, or `compiler` |
 | `MCP_COMPILER_TOOLS` | No | `false` | Register compiler provenance and health tools |
+| `MCP_RUNTIME_HYDRATION` | No | `false` | Register the opt-in runtime hydration shell |
 | `MCP_COMPILER_DB_PATH` | No | sibling `knowledge_db_compiler` | Compiler projection sidecar path |
 | `MCP_COMPILER_AST_DB_PATH` | No | sibling `knowledge_db_ast` | Compiler AST sidecar path |
 | `SCRIPT_LIBRARY_PATH` | No | `/scripts/library` | Script library mount |
@@ -235,6 +236,14 @@ the compiler/v2 runtime graph and enable the remaining compiler diagnostics:
 It does not add `find_api_endpoints`, `get_api_endpoint_context`, or
 `get_api_schema_context`; those tools were removed. Use `query_fts`,
 `query_api_schema`, and `query_yang` for normal discovery.
+
+### Runtime Hydration Shell
+
+Set `MCP_RUNTIME_HYDRATION=true` to register the first opt-in runtime
+hydration status surface. This currently adds only
+`get_runtime_hydration_status`; generic endpoint hydration and observation
+persistence are roadmap items tracked in
+[docs/runtime-hydration-roadmap.md](docs/runtime-hydration-roadmap.md).
 
 ## Tool Surface
 
