@@ -461,10 +461,11 @@ def register_runtime_hydration_tools(
     ) -> str:
         """List persisted runtime observations without calling live APIs."""
         graph = _require_graph(gm)
+        provider_filter = _normalise_provider_filter(provider)
         rows = _query_runtime_observations(
             graph,
             endpoint_id=endpoint_id,
-            provider=provider,
+            provider=provider_filter,
             limit=_clamp_limit_with_max(limit, _DEFAULT_OBSERVATION_LIMIT, _MAX_OBSERVATION_LIMIT),
         )
         if not include_raw:
@@ -526,17 +527,18 @@ def register_runtime_hydration_tools(
         graph = _require_graph(gm)
         if not endpoint_id.strip():
             raise ToolError("endpoint_id is required.")
+        provider_filter = _normalise_provider_filter(provider)
         rows = _query_runtime_observations(
             graph,
             endpoint_id=endpoint_id.strip(),
-            provider=provider,
+            provider=provider_filter,
             limit=1,
         )
         if not rows:
             return json.dumps(
                 {
                     "endpoint_id": endpoint_id.strip(),
-                    "provider": provider,
+                    "provider": provider_filter,
                     "state": "missing",
                     "latest_observation": None,
                     "message": "No runtime observation has been persisted for this endpoint.",
@@ -548,7 +550,7 @@ def register_runtime_hydration_tools(
         return json.dumps(
             {
                 "endpoint_id": endpoint_id.strip(),
-                "provider": provider,
+                "provider": provider_filter,
                 "state": latest["freshness"]["state"],
                 "latest_observation": latest,
             },
@@ -579,6 +581,7 @@ def register_runtime_hydration_tools(
         and source API endpoint.
         """
         graph = _require_graph(gm)
+        provider_filter = _normalise_provider_filter(provider)
         if observation_id.strip():
             observation = _query_runtime_observation(graph, observation_id.strip())
             if not observation:
@@ -588,7 +591,7 @@ def register_runtime_hydration_tools(
             observations = _query_runtime_observations(
                 graph,
                 endpoint_id=endpoint_id,
-                provider=provider,
+                provider=provider_filter,
                 limit=_clamp_limit_with_max(
                     limit,
                     _DEFAULT_OBSERVATION_LIMIT,
@@ -757,6 +760,7 @@ def _query_candidate_endpoints(
     graph_manager: "GraphManager",
     search: str,
     limit: int,
+    provider: str = "",
 ) -> list[dict[str, Any]]:
     search_clause = ""
     params: dict[str, Any] = {}
@@ -767,6 +771,21 @@ def _query_candidate_endpoints(
             "OR toLower(coalesce(e.operationId, '')) CONTAINS toLower($search)) "
         )
         params["search"] = search.strip()
+    provider_key = _normalise_provider_filter(provider)
+    if provider_key:
+        params["provider"] = provider_key
+        return graph_manager.query(
+            "MATCH (e:ApiEndpoint)-[:HAS_RESPONSE]->(r:Response)"
+            "-[:RESPONSE_REFERENCES]->(c:SchemaComponent) "
+            "WHERE e.method = 'GET' AND c.spec_source = $provider "
+            f"{search_clause}"
+            "RETURN DISTINCT e.endpoint_id AS endpoint_id, e.method AS method, "
+            "e.path AS path, e.summary AS summary, e.operationId AS operationId, "
+            "e.category AS category, c.spec_source AS sourceProvider "
+            f"ORDER BY e.path LIMIT {limit}",
+            params=params,
+            read_only=True,
+        )
     return graph_manager.query(
         "MATCH (e:ApiEndpoint) "
         "WHERE e.method = 'GET' "
@@ -903,6 +922,12 @@ def _normalise_provider(provider: str) -> str:
     raise ToolError(f"provider must be one of: {allowed}.")
 
 
+def _normalise_provider_filter(provider: str) -> str:
+    if not provider or not provider.strip():
+        return ""
+    return _normalise_provider(provider)
+
+
 def _planning_endpoints(
     graph_manager: "GraphManager",
     *,
@@ -914,7 +939,7 @@ def _planning_endpoints(
 ) -> list[dict[str, Any]]:
     if endpoint_id.strip() or path.strip():
         return [_resolve_endpoint(graph_manager, endpoint_id=endpoint_id, path=path)]
-    rows = _query_candidate_endpoints(graph_manager, search, _MAX_CANDIDATE_LIMIT)
+    rows = _query_candidate_endpoints(graph_manager, search, limit, provider_key)
     filtered = []
     for endpoint in rows:
         responses = _query_endpoint_responses(

@@ -155,7 +155,14 @@ class FakeHydrationGraph:
                     "rawJson": '{"serial":"SN1"}',
                 }
             ]
-        if "ApiEndpoint" in cypher and "RETURN e.endpoint_id" in cypher:
+        if (
+            "ApiEndpoint" in cypher
+            and "e.endpoint_id AS endpoint_id" in cypher
+            and "c.spec_source = $provider" in cypher
+            and (params or {}).get("provider") != "central"
+        ):
+            return []
+        if "ApiEndpoint" in cypher and "e.endpoint_id AS endpoint_id" in cypher:
             return [
                 {
                     "endpoint_id": "GET:/monitoring/v1/devices",
@@ -255,7 +262,7 @@ class ParameterizedHydrationGraph(FakeHydrationGraph):
             return []
         if "MATCH (obs:RuntimeObservation" in cypher:
             return []
-        if "ApiEndpoint" in cypher and "RETURN e.endpoint_id" in cypher:
+        if "ApiEndpoint" in cypher and "e.endpoint_id AS endpoint_id" in cypher:
             return [
                 {
                     "endpoint_id": "GET:/monitoring/v1/devices/{serial}",
@@ -664,6 +671,9 @@ def test_plan_runtime_hydration_filters_search_results_by_provider() -> None:
     assert parsed["provider"] == "greenlake"
     assert parsed["plans"] == []
     assert parsed["next_best_action"]["action"] == "search_api_graph"
+    provider_queries = [params for cypher, params, _ in graph.queries if "c.spec_source = $provider" in cypher]
+    assert provider_queries
+    assert provider_queries[0]["provider"] == "greenlake"
     assert graph.executions == []
 
 
@@ -803,6 +813,38 @@ def test_runtime_hydration_state_reports_missing_and_existing_state() -> None:
     assert parsed["state"] in {"fresh", "stale", "unknown"}
     assert parsed["latest_observation"]["freshness"]["state"] == parsed["state"]
     assert "rawJson" not in parsed["latest_observation"]
+
+
+def test_runtime_observation_filters_normalize_provider_aliases() -> None:
+    graph = FakeHydrationGraph()
+    tools = _make_tools(graph_manager=graph)
+
+    json.loads(
+        tools["list_runtime_observations"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+    json.loads(
+        tools["get_runtime_hydration_state"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+    json.loads(
+        tools["materialize_runtime_facts"](
+            endpoint_id="GET:/monitoring/v1/devices",
+            provider="aruba-central",
+        )
+    )
+
+    provider_params = [
+        params["provider"]
+        for cypher, params, _ in graph.queries
+        if params and "provider" in params and "RuntimeObservation" in cypher
+    ]
+    assert provider_params
+    assert set(provider_params) == {"central"}
 
 
 def test_materialize_runtime_facts_writes_generic_facts_with_provenance() -> None:
