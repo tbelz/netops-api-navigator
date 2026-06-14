@@ -14,6 +14,8 @@ import structlog
 from .schema import (
     ALTER_ADD_COMPILER_PROJECTION_COLUMNS,
     ALTER_ADD_LAST_SYNCED_AT,
+    HYDRATION_NODE_TABLES,
+    HYDRATION_REL_TABLES,
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
@@ -71,6 +73,7 @@ class GraphManager:
             NODE_TABLES + KNOWLEDGE_NODE_TABLES
             + REL_TABLES + KNOWLEDGE_REL_TABLES
             + TOPOLOGY_REL_TABLES + POLICY_REL_TABLES
+            + HYDRATION_NODE_TABLES + HYDRATION_REL_TABLES
         )
         for ddl in bootstrap_ddl:
             conn.execute(ddl.strip())

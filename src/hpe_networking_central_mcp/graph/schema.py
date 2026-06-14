@@ -4,6 +4,7 @@ Defines bootstrap node and relationship tables for:
   - Domain: Org, SiteCollection, Site, Device, DeviceGroup, UnmanagedDevice
   - Knowledge: ApiEndpoint, ApiCategory, DocSection, Script
   - Topology: CONNECTED_TO, LINKED_TO
+  - Runtime hydration: HydrationRun, RuntimeObservation, observed objects/fields
 """
 
 from __future__ import annotations
@@ -341,6 +342,135 @@ TOPOLOGY_REL_TABLES: list[str] = [
 
 POLICY_REL_TABLES: list[str] = []
 
+# ── Runtime hydration foundation ────────────────────────────────────
+# Generic observation/provenance layer for opt-in endpoint hydration.
+# These tables intentionally do not model specific Central domains. They store
+# the fact that an endpoint was called, the raw response envelope, decomposed
+# observation nodes/fields, and provenance edges back to the API graph. Typed
+# runtime "highways" can be materialized from these generic facts later.
+
+HYDRATION_NODE_TABLES: list[str] = [
+    """
+    CREATE NODE TABLE IF NOT EXISTS HydrationRun (
+        run_id          STRING,
+        provider        STRING,
+        endpoint_id     STRING,
+        method          STRING,
+        path            STRING,
+        parametersJson  STRING,
+        scopeJson       STRING,
+        status          STRING,
+        startedAt       TIMESTAMP,
+        finishedAt      TIMESTAMP,
+        durationMs      INT64,
+        requestHash     STRING,
+        responseHash    STRING,
+        responseBytes   INT64,
+        itemCount       INT64,
+        paginationStyle STRING,
+        error           STRING,
+        PRIMARY KEY (run_id)
+    )
+    """,
+    """
+    CREATE NODE TABLE IF NOT EXISTS RuntimeObservation (
+        observation_id      STRING,
+        run_id              STRING,
+        endpoint_id         STRING,
+        provider            STRING,
+        observedAt          TIMESTAMP,
+        status              STRING,
+        contentType         STRING,
+        rootKind            STRING,
+        rawJson             STRING,
+        responseHash        STRING,
+        responseBytes       INT64,
+        itemCount           INT64,
+        schema_component_id STRING,
+        staleAfterSeconds   INT64,
+        PRIMARY KEY (observation_id)
+    )
+    """,
+    """
+    CREATE NODE TABLE IF NOT EXISTS RuntimeObservedObject (
+        object_id           STRING,
+        observation_id      STRING,
+        endpoint_id         STRING,
+        jsonPointer         STRING,
+        schema_component_id STRING,
+        itemIndex           INT64,
+        identityJson        STRING,
+        valueType           STRING,
+        rawJson             STRING,
+        PRIMARY KEY (object_id)
+    )
+    """,
+    """
+    CREATE NODE TABLE IF NOT EXISTS RuntimeObservedField (
+        field_id       STRING,
+        object_id      STRING,
+        observation_id STRING,
+        endpoint_id    STRING,
+        property_id    STRING,
+        name           STRING,
+        jsonPointer    STRING,
+        valueJson      STRING,
+        scalarType     STRING,
+        PRIMARY KEY (field_id)
+    )
+    """,
+    """
+    CREATE NODE TABLE IF NOT EXISTS RuntimeFact (
+        fact_id        STRING,
+        observation_id STRING,
+        object_id      STRING,
+        endpoint_id    STRING,
+        entityType     STRING,
+        identityKey    STRING,
+        attributesJson STRING,
+        confidence     STRING,
+        materializedAt TIMESTAMP,
+        PRIMARY KEY (fact_id)
+    )
+    """,
+]
+
+HYDRATION_REL_TABLES: list[str] = [
+    "CREATE REL TABLE IF NOT EXISTS CALLED_API (FROM HydrationRun TO ApiEndpoint)",
+    (
+        "CREATE REL TABLE IF NOT EXISTS PRODUCED_OBSERVATION "
+        "(FROM HydrationRun TO RuntimeObservation)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS OBSERVATION_OF_SCHEMA "
+        "(FROM RuntimeObservation TO SchemaComponent)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS OBSERVATION_HAS_OBJECT "
+        "(FROM RuntimeObservation TO RuntimeObservedObject)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS OBSERVED_OBJECT_SCHEMA "
+        "(FROM RuntimeObservedObject TO SchemaComponent)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS OBSERVED_OBJECT_HAS_FIELD "
+        "(FROM RuntimeObservedObject TO RuntimeObservedField)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS OBSERVED_FIELD_PROPERTY "
+        "(FROM RuntimeObservedField TO Property)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS OBSERVATION_MATERIALIZED_FACT "
+        "(FROM RuntimeObservation TO RuntimeFact)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS FACT_FROM_OBJECT "
+        "(FROM RuntimeFact TO RuntimeObservedObject)"
+    ),
+]
+
 # ── Helpers for dynamic property lookup (used by error hints) ────────
 
 _PROP_RE = re.compile(r"^\s+(\w+)\s+", re.MULTILINE)
@@ -350,7 +480,7 @@ _TABLE_NAME_RE = re.compile(r"CREATE NODE TABLE IF NOT EXISTS (\w+)")
 def get_node_properties() -> dict[str, list[str]]:
     """Extract {TableName: [property, ...]} from the DDL, always in sync."""
     result: dict[str, list[str]] = {}
-    for ddl in NODE_TABLES + KNOWLEDGE_NODE_TABLES:
+    for ddl in NODE_TABLES + KNOWLEDGE_NODE_TABLES + HYDRATION_NODE_TABLES:
         m = _TABLE_NAME_RE.search(ddl)
         if not m:
             continue
@@ -363,14 +493,17 @@ def get_node_properties() -> dict[str, list[str]]:
 
 def get_node_tables() -> list[str]:
     """Return all node table names."""
-    return [m.group(1) for ddl in NODE_TABLES + KNOWLEDGE_NODE_TABLES
-            if (m := _TABLE_NAME_RE.search(ddl))]
+    ddl_tables = NODE_TABLES + KNOWLEDGE_NODE_TABLES + HYDRATION_NODE_TABLES
+    return [m.group(1) for ddl in ddl_tables if (m := _TABLE_NAME_RE.search(ddl))]
 
 
 def get_rel_tables() -> list[str]:
     """Return all relationship table names (including topology, policy, provenance)."""
     _rel_re = re.compile(r"CREATE REL TABLE (?:GROUP )?IF NOT EXISTS (\w+)")
-    all_ddl = REL_TABLES + KNOWLEDGE_REL_TABLES + TOPOLOGY_REL_TABLES + POLICY_REL_TABLES
+    all_ddl = (
+        REL_TABLES + KNOWLEDGE_REL_TABLES + TOPOLOGY_REL_TABLES
+        + POLICY_REL_TABLES + HYDRATION_REL_TABLES
+    )
     return [m.group(1) for ddl in all_ddl if (m := _rel_re.search(ddl))]
 
 
@@ -380,8 +513,15 @@ def get_rel_tables_with_endpoints() -> list[tuple[str, str, str]]:
         r"CREATE REL TABLE (?:GROUP )?IF NOT EXISTS (\w+)\s*\(\s*FROM\s+(\w+)\s+TO\s+(\w+)",
         re.IGNORECASE | re.DOTALL,
     )
-    all_ddl = REL_TABLES + KNOWLEDGE_REL_TABLES + TOPOLOGY_REL_TABLES + POLICY_REL_TABLES
-    return [(m.group(1), m.group(2), m.group(3)) for ddl in all_ddl if (m := _rel_detail_re.search(ddl))]
+    all_ddl = (
+        REL_TABLES + KNOWLEDGE_REL_TABLES + TOPOLOGY_REL_TABLES
+        + POLICY_REL_TABLES + HYDRATION_REL_TABLES
+    )
+    return [
+        (m.group(1), m.group(2), m.group(3))
+        for ddl in all_ddl
+        if (m := _rel_detail_re.search(ddl))
+    ]
 
 
 # ── Freshness signalling ─────────────────────────────────────────────

@@ -143,7 +143,11 @@ def test_server_module_imports_offline(monkeypatch, tmp_path):
         "get_compiler_graph_health",
     ):
         assert compiler_only not in tool_names
-    assert "get_runtime_hydration_status" not in tool_names
+    for hydration_tool in (
+        "get_runtime_hydration_status",
+        "list_runtime_hydration_candidates",
+    ):
+        assert hydration_tool not in tool_names
 
 
 def test_server_registers_compiler_tools_when_enabled(monkeypatch, tmp_path):
@@ -186,8 +190,8 @@ def test_server_registers_compiler_tools_when_enabled(monkeypatch, tmp_path):
         assert removed_tool not in tool_names
 
 
-def test_server_registers_runtime_hydration_status_when_enabled(monkeypatch, tmp_path):
-    """Runtime hydration is opt-in and starts as an inert status shell."""
+def test_server_registers_runtime_hydration_foundation_when_enabled(monkeypatch, tmp_path):
+    """Runtime hydration is opt-in and starts as a read-only foundation."""
     for var in (
         "CENTRAL_BASE_URL",
         "CENTRAL_CLIENT_ID",
@@ -216,3 +220,4 @@ def test_server_registers_runtime_hydration_status_when_enabled(monkeypatch, tmp
     assert tool_mgr is not None, "FastMCP changed tool-manager attribute name"
     tool_names = {t.name for t in tool_mgr._tools.values()}
     assert "get_runtime_hydration_status" in tool_names
+    assert "list_runtime_hydration_candidates" in tool_names

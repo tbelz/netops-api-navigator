@@ -29,6 +29,8 @@ discovery tool surface.
 - Discovery-only and read-only modes for safer review and audit workflows.
 - Optional compiler/v2 projection support for smoke testing, provenance, and
   graph-health diagnostics.
+- Optional runtime-hydration foundation for graph-backed planning of future
+  live-state observations.
 
 ## Architecture
 
@@ -53,6 +55,9 @@ FastMCP server
   |-- optional compiler tools
   |     get_openapi_source_detail, get_compiler_graph_health
   |
+  |-- optional runtime hydration tools
+  |     get_runtime_hydration_status, list_runtime_hydration_candidates
+  |
   |-- resources
         api://endpoint-catalog, docs://endpoint-catalog
         graph://schema, graph://seed-status
@@ -61,13 +66,16 @@ FastMCP server
         script://seeds
 ```
 
-The graph has two main layers:
+The graph has three main layers:
 
 - Knowledge layer: build-time API and documentation graph nodes such as
   `ApiEndpoint`, `Parameter`, `RequestBody`, `Response`, `SchemaComponent`,
   `Property`, `YangPath`, `CliCommand`, `DocSection`, and `Script`.
 - Domain layer: runtime network state such as `Org`, `SiteCollection`, `Site`,
   `Device`, `DeviceGroup`, and topology edges populated by seed scripts.
+- Runtime hydration layer: opt-in provenance nodes such as `HydrationRun`,
+  `RuntimeObservation`, `RuntimeObservedObject`, `RuntimeObservedField`, and
+  `RuntimeFact` that attach future live observations back to the API graph.
 
 ## Quick Start
 
@@ -166,7 +174,7 @@ GREENLAKE_CLIENT_SECRET=your_glp_client_secret
 | `GRAPH_DB_PATH` | No | `/data/graph_db` | Runtime LadybugDB graph path |
 | `MCP_KNOWLEDGE_PROJECTION` | No | `legacy` | Runtime projection: `legacy`, `v2`, or `compiler` |
 | `MCP_COMPILER_TOOLS` | No | `false` | Register compiler provenance and health tools |
-| `MCP_RUNTIME_HYDRATION` | No | `false` | Register the opt-in runtime hydration shell |
+| `MCP_RUNTIME_HYDRATION` | No | `false` | Register the opt-in runtime hydration foundation |
 | `MCP_COMPILER_DB_PATH` | No | sibling `knowledge_db_compiler` | Compiler projection sidecar path |
 | `MCP_COMPILER_AST_DB_PATH` | No | sibling `knowledge_db_ast` | Compiler AST sidecar path |
 | `SCRIPT_LIBRARY_PATH` | No | `/scripts/library` | Script library mount |
@@ -237,12 +245,15 @@ It does not add `find_api_endpoints`, `get_api_endpoint_context`, or
 `get_api_schema_context`; those tools were removed. Use `query_fts`,
 `query_api_schema`, and `query_yang` for normal discovery.
 
-### Runtime Hydration Shell
+### Runtime Hydration Foundation
 
 Set `MCP_RUNTIME_HYDRATION=true` to register the first opt-in runtime
-hydration status surface. This currently adds only
-`get_runtime_hydration_status`; generic endpoint hydration and observation
-persistence are roadmap items tracked in
+hydration foundation. This adds `get_runtime_hydration_status` plus
+`list_runtime_hydration_candidates`, a read-only planning tool that classifies
+GET endpoints from the compiled API graph by response shape, parameters,
+pagination hints, and identity hints. It does not call live APIs or persist
+runtime observations yet; generic endpoint execution and observation
+persistence remain roadmap items tracked in
 [docs/runtime-hydration-roadmap.md](docs/runtime-hydration-roadmap.md).
 
 ## Tool Surface
@@ -285,6 +296,13 @@ next-step hints.
 | --- | --- | --- |
 | `get_openapi_source_detail` | `MCP_COMPILER_TOOLS=true` | Resolve a compiler projection row back to projection data, provenance, AST metadata, and raw OpenAPI source. |
 | `get_compiler_graph_health` | `MCP_COMPILER_TOOLS=true` | Run bounded traversal-health samples against compiler artifacts. |
+
+### Runtime Hydration Tools
+
+| Tool | Mode | Purpose |
+| --- | --- | --- |
+| `get_runtime_hydration_status` | `MCP_RUNTIME_HYDRATION=true` | Report the opt-in hydration stage, graph availability, schema tables, and not-yet-implemented runtime capabilities. |
+| `list_runtime_hydration_candidates` | `MCP_RUNTIME_HYDRATION=true` | List GET endpoints that can be planned for future generic hydration from the compiled API graph. |
 
 ## Recommended Discovery Flow
 
