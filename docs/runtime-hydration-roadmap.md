@@ -1,6 +1,6 @@
 # Runtime Hydration Roadmap
 
-Status: roadmap
+Status: staged implementation; PR 8 generic entity highways added
 
 This roadmap sketches a multi-PR path for adding an opt-in runtime hydration
 layer to the MCP server. It intentionally stays high-level: each stage should
@@ -155,6 +155,13 @@ PR 7 should land before any typed highway work. The generic fact layer is the
 anti-artisanal checkpoint: if an observed object has clear identity, it should
 be queryable as a `RuntimeFact` even when no Central-specific typed table exists
 yet. Typed highways in PR 8 are optimization paths, not prerequisites for use.
+
+The first PR 8 implementation keeps this generic by adding `RuntimeEntity`
+highways instead of Central-specific domain tables. A `RuntimeEntity` rolls up
+clear-identity `RuntimeFact` nodes by provider, entity type, and identity key,
+while provenance remains available through fact, observation, run, and API
+edges. More specialized typed tables can still be added later, but they are not
+required for agents to hydrate and query arbitrary supported read endpoints.
 
 ### PR 9: Agent planning helpers
 

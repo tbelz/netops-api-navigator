@@ -75,7 +75,8 @@ The graph has three main layers:
   `Device`, `DeviceGroup`, and topology edges populated by seed scripts.
 - Runtime hydration layer: opt-in provenance nodes such as `HydrationRun`,
   `RuntimeObservation`, `RuntimeObservedObject`, `RuntimeObservedField`, and
-  `RuntimeFact` that attach future live observations back to the API graph.
+  `RuntimeFact`, plus generic `RuntimeEntity` highway nodes that attach future
+  live observations back to the API graph.
 
 ## Quick Start
 
@@ -256,9 +257,11 @@ Runtime observations can be inspected with `list_runtime_observations` and
 generic `RuntimeFact` nodes with `materialize_runtime_facts`. Agents can also
 ask `plan_runtime_hydration` for a read-only plan that combines endpoint
 capability, supplied parameters, provider readiness, existing observations,
-freshness, and materialized facts before making live calls. Typed runtime
-highways remain a roadmap item tracked in
-[docs/runtime-hydration-roadmap.md](docs/runtime-hydration-roadmap.md).
+freshness, and materialized facts before making live calls. Clear-identity
+facts can be rolled up with `promote_runtime_entities` into generic
+`RuntimeEntity` highways keyed by provider, entity type, and identity key. This
+keeps the common path fast without requiring one hand-written table per Central
+domain.
 
 ## Tool Surface
 
@@ -316,6 +319,9 @@ next-step hints.
 | `materialize_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | Promote observed objects with clear identity into generic `RuntimeFact` nodes. |
 | `list_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | List materialized facts by endpoint, entity type, or identity key. |
 | `get_runtime_fact` | `MCP_RUNTIME_HYDRATION=true` | Fetch one materialized fact with provenance back to observation, run, and endpoint. |
+| `promote_runtime_entities` | `MCP_RUNTIME_HYDRATION=true` | Roll clear-identity facts into generic provider-scoped `RuntimeEntity` highway nodes. |
+| `list_runtime_entities` | `MCP_RUNTIME_HYDRATION=true` | List generic entity highways by provider, endpoint, entity type, or identity key. |
+| `get_runtime_entity` | `MCP_RUNTIME_HYDRATION=true` | Fetch one generic entity highway with fact-level provenance. |
 
 ## Recommended Discovery Flow
 

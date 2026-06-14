@@ -433,6 +433,23 @@ HYDRATION_NODE_TABLES: list[str] = [
         PRIMARY KEY (fact_id)
     )
     """,
+    """
+    CREATE NODE TABLE IF NOT EXISTS RuntimeEntity (
+        entity_id          STRING,
+        provider           STRING,
+        entityType         STRING,
+        identityKey        STRING,
+        latestFactId       STRING,
+        latestEndpointId   STRING,
+        attributesJson     STRING,
+        confidence         STRING,
+        factCount          INT64,
+        firstMaterializedAt TIMESTAMP,
+        lastMaterializedAt  TIMESTAMP,
+        promotedAt          TIMESTAMP,
+        PRIMARY KEY (entity_id)
+    )
+    """,
 ]
 
 HYDRATION_REL_TABLES: list[str] = [
@@ -476,6 +493,14 @@ HYDRATION_REL_TABLES: list[str] = [
     (
         "CREATE REL TABLE IF NOT EXISTS FACT_FROM_API "
         "(FROM RuntimeFact TO ApiEndpoint)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS ENTITY_FROM_FACT "
+        "(FROM RuntimeEntity TO RuntimeFact)"
+    ),
+    (
+        "CREATE REL TABLE IF NOT EXISTS ENTITY_FROM_API "
+        "(FROM RuntimeEntity TO ApiEndpoint)"
     ),
 ]
 
