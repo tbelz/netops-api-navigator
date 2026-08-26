@@ -6,6 +6,7 @@
         "run", "-i", "--rm",
         "--pull", "always",
         "--env-file", "${workspaceFolder}/.env",
+        "-e", "READ_ONLY=true",
         "-v", "central-scripts:/scripts/library",
         "ghcr.io/tbelz/hpe-networking-central-mcp:main"
       ]
