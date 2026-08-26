@@ -54,6 +54,8 @@ from pathlib import Path
 image, repo, volume, out_path, err_path = sys.argv[1:]
 out_file = Path(out_path)
 err_file = Path(err_path)
+out_file.touch()
+err_file.touch()
 
 cmd = [
     "docker", "run", "-i", "--rm",
