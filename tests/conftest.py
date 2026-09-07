@@ -50,14 +50,13 @@ class SeedInfra:
     graph_manager: GraphManager
     ipc_server: GraphIPCServer
     lib_path: Path
-    socket_path: Path
 
     def run_seed(self, filename: str, parameters: dict[str, str] | None = None) -> SeedResult:
         """Execute a seed script as a subprocess, matching production _run_script()."""
         script_path = self.lib_path / filename
         assert script_path.exists(), f"Seed '{filename}' not found in {self.lib_path}"
 
-        cmd = ["python3", str(script_path)]
+        cmd = [sys.executable, str(script_path)]
         if parameters:
             for key, value in parameters.items():
                 cmd.extend([f"--{key}", str(value)])
@@ -72,7 +71,7 @@ class SeedInfra:
         env["GREENLAKE_CLIENT_SECRET"] = self.settings.effective_glp_client_secret
         env["GLP_BASE_URL"] = self.settings.glp_base_url
         env["GRAPH_DB_PATH"] = str(self.settings.graph_db_path)
-        env["GRAPH_IPC_SOCKET"] = str(self.socket_path)
+        env.update(self.ipc_server.environment)
 
         start = time.monotonic()
         result = subprocess.run(
@@ -205,7 +204,6 @@ def seed_infra():
     with TemporaryDirectory(prefix="seed_test_") as tmp:
         tmp_path = Path(tmp)
         db_path = tmp_path / "graph_db"
-        socket_path = tmp_path / "test_seed.sock"
         lib_path = tmp_path / "library"
         lib_path.mkdir()
 
@@ -215,7 +213,7 @@ def seed_infra():
         gm.create_fts_indexes()
 
         # Start IPC server
-        ipc = GraphIPCServer(socket_path, gm)
+        ipc = GraphIPCServer(gm)
         ipc.start()
 
         # Copy central_helpers.py and _http_core.py (both needed in subprocess)
@@ -233,7 +231,6 @@ def seed_infra():
             graph_manager=gm,
             ipc_server=ipc,
             lib_path=lib_path,
-            socket_path=socket_path,
         )
 
         yield infra
@@ -285,4 +282,3 @@ def real_central_specs() -> list[Path]:
         "`bash scripts/hydrate_test_fixtures.sh` to download, or set "
         "$CENTRAL_SPEC_CACHE to point at a directory of spec JSON files."
     )
-

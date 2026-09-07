@@ -1,0 +1,117 @@
+name: Python Package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.24"
+          enable-cache: true
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Export locked runtime constraints
+        run: >-
+          uv export --frozen --no-dev --no-emit-project
+          --format requirements-txt --output-file dist/constraints.txt
+      - name: Build workshop starter
+        run: uv run --frozen python scripts/build_workshop_bundle.py --constraints dist/constraints.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-distribution
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  native-smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-14, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.24"
+          enable-cache: true
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Install and diagnose exact wheel without source builds
+        shell: bash
+        env:
+          MCP_PROFILE: workshop
+          KNOWLEDGE_RELEASE_REPO: ""
+          GRAPH_DB_PATH: ${{ runner.temp }}/central-mcp/doctor-graph
+          SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/central-mcp/scripts
+          SPEC_CACHE_DIR: ${{ runner.temp }}/central-mcp/cache
+        run: |
+          WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$WHEEL"
+          uv tool run --python 3.12 --no-build --constraints dist/constraints.txt --from "$WHEEL" \
+            hpe-networking-central-mcp doctor --profile workshop --skip-credentials
+      - name: Verify MCP stdio handshake and workshop tool surface
+        shell: bash
+        env:
+          MCP_PROFILE: workshop
+          KNOWLEDGE_RELEASE_REPO: ""
+          GRAPH_DB_PATH: ${{ runner.temp }}/central-mcp/smoke-graph
+          SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/central-mcp/scripts
+          SPEC_CACHE_DIR: ${{ runner.temp }}/central-mcp/cache
+        run: |
+          WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          uv run --no-project --python 3.12 scripts/smoke_mcp_stdio.py -- \
+            uv tool run --python 3.12 --no-build --constraints dist/constraints.txt --from "$WHEEL" \
+            hpe-networking-central-mcp --profile workshop
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, native-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "v${VERSION}" = "${GITHUB_REF_NAME}"
+      - name: Prepare PyPI distributions
+        run: |
+          mkdir publish
+          cp dist/*.whl publish/
+          cp dist/hpe_networking_central_mcp-*.tar.gz publish/
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+      - name: Generate release checksums
+        working-directory: dist
+        run: sha256sum ./* > SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}" dist/*
+          --verify-tag --generate-notes
+          --title "HPE Networking Central MCP ${GITHUB_REF_NAME}"

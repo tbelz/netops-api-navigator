@@ -23,15 +23,26 @@ from __future__ import annotations
 import json
 import os
 
-from _http_core import (  # noqa: F401 — re-exported for scripts
-    BaseHTTPClient,
-    CentralAPIError,
-    AuthenticationError,
-    RateLimitError,
-    NotFoundError,
-    PaginationError,
-    detect_item_key,
-)
+try:  # Installed package import (tests and direct library use)
+    from ._http_core import (  # type: ignore[import-not-found]
+        AuthenticationError,
+        BaseHTTPClient,
+        CentralAPIError,
+        NotFoundError,
+        PaginationError,
+        RateLimitError,
+        detect_item_key,
+    )
+except ImportError:  # Copied next to _http_core.py in the script library
+    from _http_core import (  # type: ignore[no-redef]  # noqa: F401
+        AuthenticationError,
+        BaseHTTPClient,
+        CentralAPIError,
+        NotFoundError,
+        PaginationError,
+        RateLimitError,
+        detect_item_key,
+    )
 
 
 class CentralAPI(BaseHTTPClient):
@@ -281,9 +292,10 @@ glp = GreenLakeAPI()
 class GraphHelper:
     """Read/write access to the shared LadybugDB graph database via IPC.
 
-    The MCP server runs a Unix domain socket IPC server that holds the
-    LadybugDB database open.  Scripts connect to it via GRAPH_IPC_SOCKET and
-    send JSON requests instead of opening the database directly.
+    The MCP server runs an authenticated loopback TCP endpoint that holds the
+    LadybugDB database open. Scripts receive its host, ephemeral port, and
+    capability token through their environment and send JSON requests instead
+    of opening the database directly.
 
     Usage::
 
@@ -298,6 +310,7 @@ class GraphHelper:
         self._sock = None
         self._rfile = None
         self._wfile = None
+        self._token = ""
         self._req_id = 0
 
     def _ensure_conn(self):
@@ -305,21 +318,35 @@ class GraphHelper:
             return
         import socket as _socket
 
-        sock_path = os.environ.get("GRAPH_IPC_SOCKET", "")
-        if not sock_path:
+        host = os.environ.get("GRAPH_IPC_HOST", "")
+        port = os.environ.get("GRAPH_IPC_PORT", "")
+        token = os.environ.get("GRAPH_IPC_TOKEN", "")
+        if not host or not port or not token:
             raise RuntimeError(
-                "GRAPH_IPC_SOCKET not set — graph access is only available in scripts "
-                "executed via the MCP server."
+                "GRAPH_IPC_HOST/PORT/TOKEN not set — graph access is only "
+                "available in scripts executed via the MCP server."
             )
-        self._sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-        self._sock.connect(sock_path)
+        if host != "127.0.0.1":
+            raise RuntimeError("Graph IPC host must be the local loopback address")
+        try:
+            port_number = int(port)
+        except ValueError as exc:
+            raise RuntimeError("GRAPH_IPC_PORT must be an integer") from exc
+        self._token = token
+        self._sock = _socket.create_connection((host, port_number), timeout=10)
         self._rfile = self._sock.makefile("rb")
         self._wfile = self._sock.makefile("wb")
 
     def _call(self, method: str, cypher: str, params: dict | None = None) -> list[dict]:
         self._ensure_conn()
         self._req_id += 1
-        req = {"id": self._req_id, "method": method, "cypher": cypher, "params": params or {}}
+        req = {
+            "id": self._req_id,
+            "token": self._token,
+            "method": method,
+            "cypher": cypher,
+            "params": params or {},
+        }
         data = (json.dumps(req, default=str) + "\n").encode("utf-8")
         self._wfile.write(data)
         self._wfile.flush()
@@ -342,4 +369,3 @@ class GraphHelper:
 
 # Module-level graph singleton
 graph = GraphHelper()
-

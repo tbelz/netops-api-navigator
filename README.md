@@ -1,6 +1,7 @@
 # HPE Networking Central MCP Server
 
 [![Build](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/build-and-push.yml)
+[![Python Package](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/python-package.yml/badge.svg)](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/python-package.yml)
 [![Knowledge DB](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/update-knowledge-db.yml/badge.svg)](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/update-knowledge-db.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
@@ -82,10 +83,33 @@ The graph has three main layers:
 
 Prerequisites:
 
-- Docker for the published image path.
+- `uv` for the native Python path, or Docker for the container path.
 - HPE Aruba Networking Central credentials for connected mode.
 - Optional GreenLake Platform credentials, otherwise GreenLake uses the Central
   credentials when possible.
+
+### Native Python Installation (Windows x64 and Apple Silicon)
+
+This is the production path for local use without Docker or WSL. It runs the
+server directly on the host and stores data in the operating system's normal
+per-user application directories.
+
+Install `uv` with `winget install --id=astral-sh.uv -e` on Windows or
+`brew install uv` on macOS, then install the pinned server release:
+
+```text
+uv tool install --python 3.12 --no-build --constraints constraints.txt hpe-networking-central-mcp==0.3.0
+hpe-networking-central-mcp doctor --profile workshop --skip-credentials
+```
+
+`uv` installs Python 3.12 when it is not already available. The GitHub release
+contains the wheel, locked `constraints.txt`, checksums, source archive, and a
+ready-to-open VS Code workshop bundle. Separate `.msi`, `.exe`, or `.pkg`
+installers are intentionally not required.
+
+The starter configuration is documented in [`workshop/README.md`](workshop/README.md).
+It prompts for credentials through VS Code password inputs and launches the
+strict GET-only workshop profile.
 
 ### Discovery-Only Docker Profile
 
@@ -150,8 +174,8 @@ workstations, prefer an env file or platform secret store.
 
 ## Configuration
 
-You can pass the same settings through Docker `-e` flags, an `--env-file`, or
-the CLI flags shown above.
+You can pass the same settings through the host environment, Docker `-e` flags,
+an `--env-file`, or the CLI flags shown above.
 
 ```env
 CENTRAL_BASE_URL=https://apigw-YOUR_CLUSTER.central.arubanetworks.com
@@ -170,21 +194,24 @@ GREENLAKE_CLIENT_SECRET=your_glp_client_secret
 | `GREENLAKE_CLIENT_SECRET` | No | Central client secret | GreenLake OAuth2 client secret |
 | `GLP_BASE_URL` | No | `https://global.api.greenlake.hpe.com` | GreenLake API base URL |
 | `GLP_INCLUDED_SLUGS` | No | default set | Comma-separated GreenLake service slugs, or `*` for all |
+| `MCP_PROFILE` | No | `full` | `full` or fail-closed `workshop` profile |
 | `READ_ONLY` | No | `false` | Refuse mutating Central/GreenLake HTTP methods |
-| `KNOWLEDGE_RELEASE_REPO` | No | none | GitHub repo (`owner/name`) to download knowledge DB releases from |
-| `GRAPH_DB_PATH` | No | `/data/graph_db` | Runtime LadybugDB graph path |
+| `KNOWLEDGE_RELEASE_REPO` | No | this repository | GitHub repo (`owner/name`) to download knowledge DB releases from |
+| `KNOWLEDGE_RELEASE_TAG` | No | newest `knowledge-db-*` release | Immutable Knowledge DB release pin |
+| `KNOWLEDGE_ASSET_SHA256` | No | GitHub asset digest | Optional explicit archive digest |
+| `GRAPH_DB_PATH` | No | per-user application data | Runtime LadybugDB graph path |
 | `MCP_KNOWLEDGE_PROJECTION` | No | `legacy` | Runtime projection: `legacy`, `v2`, or `compiler` |
 | `MCP_COMPILER_TOOLS` | No | `false` | Register compiler provenance and health tools |
 | `MCP_RUNTIME_HYDRATION` | No | `false` | Register the opt-in runtime hydration foundation |
 | `MCP_COMPILER_DB_PATH` | No | sibling `knowledge_db_compiler` | Compiler projection sidecar path |
 | `MCP_COMPILER_AST_DB_PATH` | No | sibling `knowledge_db_ast` | Compiler AST sidecar path |
-| `SCRIPT_LIBRARY_PATH` | No | `/scripts/library` | Script library mount |
+| `SCRIPT_LIBRARY_PATH` | No | per-user application data | Script library path |
 | `INVENTORY_CACHE_TTL` | No | `300` | Runtime inventory cache TTL in seconds |
 
-The published Docker image sets
-`KNOWLEDGE_RELEASE_REPO=tbelz/hpe-networking-central-mcp`, so normal container
-starts download the latest released knowledge DB automatically. Local
-non-Docker runs leave it empty unless you set it.
+Native and Docker starts download the newest Knowledge DB release automatically.
+Set `KNOWLEDGE_RELEASE_TAG` for an immutable workshop snapshot. Downloads use
+the SHA-256 digest reported by GitHub and are staged before replacing the local
+database.
 
 Partial Central credentials are treated as a configuration error. Provide all of
 `CENTRAL_BASE_URL`, `CENTRAL_CLIENT_ID`, and `CENTRAL_CLIENT_SECRET` for
@@ -211,6 +238,20 @@ Set `READ_ONLY=true` or pass `--read-only`. The server rejects `POST`, `PUT`,
 endpoints are filtered out of `api://endpoint-catalog`. Local graph writes,
 script saves, and script execution remain available, so this is an agent
 guardrail rather than a sandbox for untrusted script authors.
+
+### Workshop
+
+Set `MCP_PROFILE=workshop` or pass `--profile workshop` for the smallest,
+fail-closed surface intended for guided onboarding. The profile always enables
+read-only mode and exposes only graph/API discovery, a secret-free status tool,
+and—when valid Central credentials are present—GET-only Central API calls. It
+does not register script creation or execution, local graph writes, GreenLake,
+runtime hydration, compiler tools, prompts, or automatic seed jobs.
+
+Run `hpe-networking-central-mcp doctor --profile workshop` before connecting an
+MCP client. Add `--skip-credentials` to validate only the local installation.
+The prebuilt [`workshop/`](workshop/) starter is included as a ZIP in tagged
+GitHub releases.
 
 ### Compiler / v2 Smoke
 
@@ -378,6 +419,18 @@ Build the Docker image locally:
 ```bash
 docker build -t hpe-networking-central-mcp .
 ```
+
+## Python Releases
+
+Every pull request builds the Python distribution and smoke-tests the exact
+wheel on Windows x64, macOS Apple Silicon, and Linux. These jobs run the
+installed `doctor` command and a real MCP stdio initialize/tool-list handshake.
+
+Pushing a version tag such as `v0.3.0` runs the same gates and, after they pass,
+publishes the wheel and source distribution to PyPI using Trusted Publishing.
+It also creates a GitHub release containing the distributions, locked runtime
+constraints, checksums, and the ready-to-open workshop ZIP. Repository and PyPI
+Trusted Publishing must be configured before the first tagged release.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for build-pipeline details and
 test-marker guidance. Architecture decisions live in [docs/adr/](docs/adr/).

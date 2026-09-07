@@ -70,9 +70,17 @@ class TestBuildEnv:
         assert env["GREENLAKE_CLIENT_SECRET"] == "glp-csec"
 
     def test_graph_paths_in_env(self, settings):
-        env = _build_env(settings)
+        ipc_env = {
+            "GRAPH_IPC_HOST": "127.0.0.1",
+            "GRAPH_IPC_PORT": "54321",
+            "GRAPH_IPC_TOKEN": "test-token",
+        }
+        env = _build_env(settings, ipc_env=ipc_env)
         assert "graph.db" in env["GRAPH_DB_PATH"]
-        assert "graph.sock" in env["GRAPH_IPC_SOCKET"]
+        assert env["GRAPH_IPC_HOST"] == "127.0.0.1"
+        assert env["GRAPH_IPC_PORT"] == "54321"
+        assert env["GRAPH_IPC_TOKEN"] == "test-token"
+        assert "GRAPH_IPC_SOCKET" not in env
 
     def test_stale_vars_removed(self, settings):
         """Generic vars like BASE_URL should be cleaned from env."""
@@ -129,6 +137,7 @@ class TestRunScript:
             _run_script(settings, "hello.py", {"site": "NYC", "device": "SW01"})
 
         cmd = mock_run.call_args[0][0]
+        assert cmd[0] == sys.executable
         assert "--site" in cmd
         assert "NYC" in cmd
         assert "--device" in cmd

@@ -1,24 +1,26 @@
-"""HPE Networking Central MCP Server - API Discovery + Code Interpreter Pattern."""
+"""HPE Networking Central MCP server lifecycle and CLI."""
 
 from __future__ import annotations
 
 import argparse
-import atexit
 import graphlib
 import json
 import os
+import platform
 import shutil
 import sys
 import threading
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
 
 import httpx
-
 from mcp.server.fastmcp import FastMCP
 
+from . import __version__
 from .api_tree import render_path_tree
 from .central_client import CentralAPIError, CentralClient, GreenLakeClient
-from .config import load_settings
+from .config import Settings, load_settings
 from .graph import GraphManager
 from .graph.ipc_server import GraphIPCServer
 from .instructions import build_instructions
@@ -27,73 +29,135 @@ from .logging import setup_logging
 from .prompts.workflows import register_prompts
 from .resources.docs import register_api_catalog_resource, register_resources
 from .resources.graph import register_graph_resources
-from .tools.api_call import register_api_call_tools, register_greenlake_api_call_tools
-from .tools.compiler import register_compiler_tools
-from .tools.execution import register_execution_tools, _run_script
+from .tools.api_call import (
+    register_api_call_tools,
+    register_greenlake_api_call_tools,
+    register_workshop_api_call_tool,
+)
+from .tools.execution import _run_script, register_execution_tools
 from .tools.graph import register_graph_tools
-from .tools.hydration import register_runtime_hydration_tools
 from .tools.scripts import register_script_tools, sync_seeds_to_graph
+from .tools.status import register_status_tool
 
 logger = setup_logging()
+_KNOWLEDGE_SCHEMA_VERSION = 10
+_WORKSHOP_GRAPH_TOOLS_TO_REMOVE = {"write_graph", "query_topology", "query_runtime"}
 
 
-def _parse_server_args() -> None:
-    """Translate optional CLI args into the env vars that ``config.py`` reads.
+class StartupError(RuntimeError):
+    """Raised when the server cannot reach a safe, usable startup state."""
 
-    The MCP server has historically been configured exclusively through
-    environment variables, which forces deployments (Claude Desktop, VS Code,
-    docker-compose, ...) to duplicate every credential between the Docker
-    ``-e VAR`` flag list and a separate JSON ``env`` block. Accepting the same
-    values as proper CLI arguments lets the launcher pass everything in one
-    flat ``args`` array and drop the ``env`` block entirely. CLI values, when
-    provided, take precedence over any already-set env vars.
 
-    Unknown arguments are tolerated (``parse_known_args``) so this never
-    fights FastMCP's own argv handling.
-    """
-    parser = argparse.ArgumentParser(
-        prog="hpe-networking-central-mcp",
-        description=(
-            "HPE Networking Central MCP server. With no credentials the server "
-            "starts in discovery-only mode (knowledge DB + script CRUD only, "
-            "no live Central / GreenLake API calls)."
-        ),
-        add_help=False,  # don't shadow FastMCP's own --help if it ever adds one
-        allow_abbrev=False,  # prevent partial-flag matching from swallowing launcher args
+@dataclass
+class ServerRuntime:
+    """Resources owned by one configured MCP server instance."""
+
+    settings: Settings
+    mcp: FastMCP
+    graph_manager: GraphManager
+    client: CentralClient | None
+    glp_client: GreenLakeClient | None
+    offline_mode: bool
+    knowledge_downloaded: bool
+    ipc_server: GraphIPCServer | None = None
+    seed_status: dict[str, dict] = field(default_factory=dict)
+
+    def close(self) -> None:
+        if self.ipc_server is not None:
+            self.ipc_server.stop()
+            self.ipc_server = None
+        if self.client is not None:
+            self.client.close()
+        if self.glp_client is not None:
+            self.glp_client.close()
+        self.graph_manager.close()
+
+
+def _credential_presence(settings: Settings) -> tuple[bool, bool, bool]:
+    return (
+        bool(settings.central_base_url),
+        bool(settings.central_client_id),
+        bool(settings.central_client_secret),
     )
-    parser.add_argument("--central-url", dest="central_url", default=None,
-                        help="Central API base URL (sets CENTRAL_BASE_URL).")
-    parser.add_argument("--client-id", dest="client_id", default=None,
-                        help="Central OAuth2 client ID (sets CENTRAL_CLIENT_ID).")
-    parser.add_argument("--client-secret", dest="client_secret", default=None,
-                        help="Central OAuth2 client secret (sets CENTRAL_CLIENT_SECRET).")
-    parser.add_argument("--glp-client-id", dest="glp_client_id", default=None,
-                        help="GreenLake OAuth2 client ID (sets GREENLAKE_CLIENT_ID).")
-    parser.add_argument("--glp-client-secret", dest="glp_client_secret", default=None,
-                        help="GreenLake OAuth2 client secret (sets GREENLAKE_CLIENT_SECRET).")
-    parser.add_argument("--read-only", dest="read_only", action="store_true",
-                        help="Refuse mutating Central / GreenLake API calls (sets READ_ONLY=true).")
-    args, _unknown = parser.parse_known_args()
-    if args.central_url:
-        os.environ["CENTRAL_BASE_URL"] = args.central_url
-    if args.client_id:
-        os.environ["CENTRAL_CLIENT_ID"] = args.client_id
-    if args.client_secret:
-        os.environ["CENTRAL_CLIENT_SECRET"] = args.client_secret
-    if args.glp_client_id:
-        os.environ["GREENLAKE_CLIENT_ID"] = args.glp_client_id
-    if args.glp_client_secret:
-        os.environ["GREENLAKE_CLIENT_SECRET"] = args.glp_client_secret
-    if args.read_only:
-        os.environ["READ_ONLY"] = "true"
 
 
-_parse_server_args()
-settings = load_settings()
+def _create_central_client(
+    settings: Settings, *, validate_credentials: bool
+) -> tuple[CentralClient | None, bool]:
+    presence = _credential_presence(settings)
+    if any(presence) and not all(presence):
+        names = ("CENTRAL_BASE_URL", "CENTRAL_CLIENT_ID", "CENTRAL_CLIENT_SECRET")
+        missing = [name for name, present in zip(names, presence) if not present]
+        raise StartupError(
+            "Partial Central credentials detected. Provide all three Central "
+            f"settings or none. Missing: {', '.join(missing)}"
+        )
+    if not settings.has_credentials:
+        return None, True
+
+    client = CentralClient(
+        settings.central_base_url,
+        settings.central_client_id,
+        settings.central_client_secret,
+    )
+    if validate_credentials:
+        try:
+            client.validate()
+        except (CentralAPIError, httpx.HTTPError, OSError) as exc:
+            client.close()
+            raise StartupError(
+                "Central credential validation failed; could not obtain an OAuth2 token."
+            ) from exc
+    return client, False
+
+
+def _create_greenlake_client(
+    settings: Settings, *, offline_mode: bool, validate_credentials: bool
+) -> GreenLakeClient | None:
+    if offline_mode or settings.workshop_mode or not settings.has_glp_credentials:
+        return None
+    client = GreenLakeClient(
+        settings.glp_base_url,
+        settings.effective_glp_client_id,
+        settings.effective_glp_client_secret,
+    )
+    if validate_credentials:
+        try:
+            client.validate()
+        except Exception as exc:
+            logger.warning(
+                "glp_validation_failed",
+                error=str(exc),
+                hint="GreenLake features will be unavailable. Central features still work.",
+            )
+            client.close()
+            return None
+    return client
+
+
+def _knowledge_artifact(settings: Settings) -> tuple[str, str]:
+    if settings.knowledge_projection == "v2":
+        return "knowledge_db_compiler.tar.gz", "knowledge_db_compiler"
+    return "knowledge_db.tar.gz", "knowledge_db"
+
+
+def _download_runtime_knowledge_db(settings: Settings, *, force: bool = False) -> bool:
+    asset_name, archive_member = _knowledge_artifact(settings)
+    return download_knowledge_db(
+        settings.knowledge_release_repo,
+        settings.graph_db_path,
+        asset_name=asset_name,
+        archive_member=archive_member,
+        projection=settings.knowledge_projection,
+        release_tag=settings.knowledge_release_tag,
+        expected_sha256=settings.knowledge_asset_sha256,
+        require_digest=bool(settings.knowledge_release_repo),
+        force=force,
+        logger=logger,
+    )
 
 
 def _is_recoverable_runtime_db_open_error(exc: BaseException) -> bool:
-    """Return True for persisted LadybugDB failures that a fresh release can fix."""
     if not isinstance(exc, (RuntimeError, OSError)):
         return False
     msg = str(exc).lower()
@@ -109,138 +173,8 @@ def _is_recoverable_runtime_db_open_error(exc: BaseException) -> bool:
         )
     )
 
-# ── Credential gate: connected vs discovery-only mode ─────────────────
-# When CENTRAL_BASE_URL / CENTRAL_CLIENT_ID / CENTRAL_CLIENT_SECRET are all
-# present we run in connected mode and validate the token up front. With
-# no credentials the server starts in *discovery-only* mode: it serves the
-# knowledge DB (graph queries, embedded API catalog) and script CRUD, but
-# does not register the tools that talk to live Central / GreenLake. This
-# supports the workflow where an agent designs API calls and writes scripts
-# the user reviews before running against a real environment.
-# Detect partial / misconfigured credentials and surface the problem loudly
-# rather than silently falling through to discovery-only mode.
-_cred_set = bool(settings.central_base_url), bool(settings.central_client_id), bool(settings.central_client_secret)
-if any(_cred_set) and not all(_cred_set):
-    _missing = [name for name, present in zip(
-        ("CENTRAL_BASE_URL", "CENTRAL_CLIENT_ID", "CENTRAL_CLIENT_SECRET"), _cred_set
-    ) if not present]
-    logger.error(
-        "partial_credentials_detected",
-        hint=(
-            "Some but not all Central credentials are set. This is probably a "
-            "configuration mistake. Provide all three (CENTRAL_BASE_URL, "
-            "CENTRAL_CLIENT_ID, CENTRAL_CLIENT_SECRET) for connected mode, or "
-            "none of them for discovery-only mode."
-        ),
-        missing=_missing,
-    )
-    sys.exit(1)
 
-_offline_mode = not settings.has_credentials
-client: CentralClient | None = None
-if _offline_mode:
-    logger.info(
-        "discovery_only_mode_active",
-        hint=(
-            "No Central credentials configured. The server is running in "
-            "discovery-only mode: query_graph, write_graph, list_scripts, "
-            "get_script_content, and save_script are available; "
-            "call_central_api, call_greenlake_api, and execute_script are not. "
-            "Pass --central-url / --client-id / --client-secret (or the matching "
-            "CENTRAL_* env vars) to enable connected mode."
-        ),
-    )
-else:
-    try:
-        client = CentralClient(
-            settings.central_base_url,
-            settings.central_client_id,
-            settings.central_client_secret,
-        )
-        client.validate()
-        logger.info("credentials_validated")
-    except (CentralAPIError, httpx.HTTPError, OSError) as exc:
-        logger.error(
-            "startup_failed",
-            reason="Credential validation failed — could not obtain OAuth2 token.",
-            error=str(exc),
-        )
-        sys.exit(1)
-    except Exception:
-        # Unexpected error (e.g. coding regression, missing dep) — surface the
-        # full traceback rather than masking it as a credential failure.
-        raise
-
-# ── Download knowledge DB from GitHub release (if configured) ─────────
-# Try to download knowledge DB before initializing graph
-_knowledge_asset_name = (
-    "knowledge_db_compiler.tar.gz"
-    if settings.knowledge_projection == "v2"
-    else "knowledge_db.tar.gz"
-)
-_knowledge_archive_member = (
-    "knowledge_db_compiler"
-    if settings.knowledge_projection == "v2"
-    else "knowledge_db"
-)
-
-
-def _download_runtime_knowledge_db(*, force: bool = False) -> bool:
-    return download_knowledge_db(
-        settings.knowledge_release_repo,
-        settings.graph_db_path,
-        asset_name=_knowledge_asset_name,
-        archive_member=_knowledge_archive_member,
-        projection=settings.knowledge_projection,
-        force=force,
-        logger=logger,
-    )
-
-
-knowledge_downloaded = _download_runtime_knowledge_db()
-logger.info(
-    "knowledge_projection_selected",
-    projection=settings.knowledge_projection,
-    asset=_knowledge_asset_name,
-    graph_db_path=str(settings.graph_db_path),
-)
-
-compiler_db_downloaded = False
-compiler_ast_downloaded = False
-if settings.compiler_tools:
-    if settings.compiler_db_path == settings.graph_db_path and settings.knowledge_projection == "v2":
-        logger.info(
-            "compiler_db_reusing_runtime_projection",
-            compiler_db_path=str(settings.compiler_db_path),
-        )
-    else:
-        compiler_db_downloaded = download_knowledge_db(
-            settings.knowledge_release_repo,
-            settings.compiler_db_path,
-            asset_name="knowledge_db_compiler.tar.gz",
-            archive_member="knowledge_db_compiler",
-            projection="v2",
-            manifest_name="compiler_manifest.json",
-            logger=logger,
-        )
-    compiler_ast_downloaded = download_knowledge_db(
-        settings.knowledge_release_repo,
-        settings.compiler_ast_db_path,
-        asset_name="knowledge_db_ast.tar.gz",
-        archive_member="knowledge_db_ast",
-        projection="ast",
-        manifest_name="ast_manifest.json",
-        logger=logger,
-    )
-    logger.info(
-        "compiler_tools_artifacts_selected",
-        compiler_db_path=str(settings.compiler_db_path),
-        ast_db_path=str(settings.compiler_ast_db_path),
-        compiler_db_downloaded=compiler_db_downloaded,
-        ast_downloaded=compiler_ast_downloaded,
-    )
-
-def _initialize_runtime_graph() -> tuple[GraphManager, bool]:
+def _initialize_runtime_graph(settings: Settings) -> tuple[GraphManager, bool]:
     manager = GraphManager(settings.graph_db_path)
     try:
         manager.initialize()
@@ -257,43 +191,14 @@ def _initialize_runtime_graph() -> tuple[GraphManager, bool]:
             db_path=str(settings.graph_db_path),
             error=str(exc),
         )
-        redownloaded = _download_runtime_knowledge_db(force=True)
-        if not redownloaded:
-            logger.error(
-                "knowledge_db_reinstall_failed",
-                db_path=str(settings.graph_db_path),
-                hint="Could not refresh the persisted knowledge DB after an open failure.",
-            )
-            raise
+        if not _download_runtime_knowledge_db(settings, force=True):
+            raise StartupError("Could not reinstall an unreadable knowledge database") from exc
         recovered = GraphManager(settings.graph_db_path)
         recovered.initialize()
-        logger.info(
-            "knowledge_db_reinstall_recovered",
-            db_path=str(settings.graph_db_path),
-        )
         return recovered, True
 
 
-# Initialize file-backed graph database
-graph_manager, _knowledge_recovered = _initialize_runtime_graph()
-knowledge_downloaded = knowledge_downloaded or _knowledge_recovered
-graph_manager.create_fts_indexes()
-
-
-# ── Knowledge DB schema-version check ────────────────────────────────
-# Version 8 (ADR 009 Phase 2E) drops the skeleton/glossary/components
-# JSON blob columns and the ApiEndpointSkeleton node table — all API
-# discovery now flows through the Property/Parameter/SchemaComponent
-# subgraph and the ``query_graph`` tool (see ADR 010).
-# Version 9 adds the ``lastSyncedAt`` timestamp column to
-# Site/SiteCollection/DeviceGroup/Device for freshness signalling.
-# Existing databases are migrated in place via ``ALTER TABLE ... ADD``
-# at startup, but the version bump triggers a clean rebuild for users
-# who prefer it.
-_KNOWLEDGE_SCHEMA_VERSION = 10
-
-
-def _check_knowledge_schema_version() -> None:
+def _check_knowledge_schema_version(settings: Settings) -> None:
     manifest_path = settings.graph_db_path.parent / "manifest.json"
     if not manifest_path.exists():
         logger.info("knowledge_manifest_missing", path=str(manifest_path))
@@ -301,284 +206,416 @@ def _check_knowledge_schema_version() -> None:
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        logger.warning("knowledge_manifest_unreadable", error=str(exc))
-        return
+        raise StartupError(f"Knowledge manifest is unreadable: {manifest_path}") from exc
     found = manifest.get("schema_version")
     if found != _KNOWLEDGE_SCHEMA_VERSION:
-        msg = (
-            f"Knowledge DB schema_version={found!r} does not match "
-            f"server-required version {_KNOWLEDGE_SCHEMA_VERSION}. "
-            "Re-run scripts/build_knowledge_db.py or wait for the next "
-            "knowledge-db release. Refusing to start to avoid serving "
-            "stale query_graph / pre-flight validator results against an "
-            "out-of-date schema."
+        raise StartupError(
+            f"Knowledge DB schema_version={found!r} does not match required "
+            f"version {_KNOWLEDGE_SCHEMA_VERSION}."
         )
-        logger.error("knowledge_schema_version_mismatch", expected=_KNOWLEDGE_SCHEMA_VERSION, found=found)
-        raise SystemExit(msg)
 
 
-_check_knowledge_schema_version()
+def _check_knowledge_pin(settings: Settings) -> None:
+    """Refuse an existing cache that does not match an explicit workshop pin."""
+    if not settings.knowledge_release_tag and not settings.knowledge_asset_sha256:
+        return
+    manifest_path = settings.graph_db_path.parent / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise StartupError(
+            "The installed Knowledge DB has no readable manifest for the requested pin."
+        ) from exc
+    if (
+        settings.knowledge_release_tag
+        and manifest.get("release_tag") != settings.knowledge_release_tag
+    ):
+        raise StartupError(
+            "The installed Knowledge DB does not match KNOWLEDGE_RELEASE_TAG."
+        )
+    if (
+        settings.knowledge_asset_sha256
+        and manifest.get("knowledge_asset_sha256") != settings.knowledge_asset_sha256
+    ):
+        raise StartupError(
+            "The installed Knowledge DB does not match KNOWLEDGE_ASSET_SHA256."
+        )
 
 
-# ── Render API endpoint catalog as a path-tree for the system instructions ──
-def _load_api_tree() -> str:
-    """Query all ApiEndpoint rows and render them as a category-grouped path-tree.
-
-    The result is embedded into the MCP server's system instructions so the
-    agent always sees the full set of available endpoints without needing
-    to call a search tool first.
-    """
+def _load_api_tree(graph_manager: GraphManager, settings: Settings) -> str:
     try:
         rows = graph_manager.query(
-            "MATCH (e:ApiEndpoint) "
-            "RETURN e.method AS method, e.path AS path, "
+            "MATCH (e:ApiEndpoint) RETURN e.method AS method, e.path AS path, "
             "e.category AS category, e.deprecated AS deprecated",
             read_only=True,
         )
     except Exception as exc:
         logger.warning("api_tree_query_failed", error=str(exc))
-        return render_path_tree([], read_only=settings.read_only)
-
-    text = render_path_tree(rows, read_only=settings.read_only)
-    logger.info(
-        "api_tree_rendered",
-        endpoint_count=len(rows),
-        chars=len(text),
-        approx_tokens=len(text) // 4,
-    )
-    return text
+        rows = []
+    return render_path_tree(rows, read_only=settings.read_only)
 
 
-_api_tree_text = _load_api_tree()
-
-mcp = FastMCP(
-    "hpe-networking-central-mcp",
-    instructions=build_instructions(
-        read_only=settings.read_only,
-        api_tree=_api_tree_text,
-        offline_mode=_offline_mode,
-    ),
-)
-
-# Start IPC server for script subprocesses
-ipc_server = GraphIPCServer(settings.graph_ipc_socket, graph_manager)
-ipc_server.start()
-atexit.register(ipc_server.stop)
-
-# ── Optionally initialize GreenLake client ────────────────────────────────
-glp_client: GreenLakeClient | None = None
-if _offline_mode:
-    logger.info("greenlake_disabled", reason="discovery_only_mode")
-elif settings.has_glp_credentials:
-    try:
-        glp_client = GreenLakeClient(
-            settings.glp_base_url,
-            settings.effective_glp_client_id,
-            settings.effective_glp_client_secret,
-        )
-        glp_client.validate()
-        logger.info("glp_credentials_validated")
-    except Exception as exc:
-        logger.warning(
-            "glp_validation_failed",
-            error=str(exc),
-            hint="GreenLake features will be unavailable. Central features still work.",
-        )
-        glp_client = None
-else:
-    logger.info("glp_credentials_not_configured", hint="GreenLake features disabled")
-
-# Ensure script library exists and central_helpers.py + _http_core.py are available
-settings.script_library_path.mkdir(parents=True, exist_ok=True)
-
-_pkg_dir = Path(__file__).parent
-for _helper_name in ("_http_core.py", "central_helpers.py"):
-    _helpers_src = _pkg_dir / _helper_name
-    _helpers_dst = settings.script_library_path / _helper_name
-    if _helpers_src.exists():
-        shutil.copy2(_helpers_src, _helpers_dst)
-        logger.info("helper_copied", file=_helper_name, dest=str(_helpers_dst))
-
-# Sync seed scripts into graph DB and disk library
-_seeds_dir = Path(__file__).parent / "seeds"
-if _seeds_dir.is_dir():
-    sync_seeds_to_graph(graph_manager, _seeds_dir, settings.script_library_path)
+def _prepare_script_library(settings: Settings, graph_manager: GraphManager) -> None:
+    settings.script_library_path.mkdir(parents=True, exist_ok=True)
+    package_dir = Path(__file__).parent
+    for helper_name in ("_http_core.py", "central_helpers.py"):
+        source = package_dir / helper_name
+        if source.exists():
+            shutil.copy2(source, settings.script_library_path / helper_name)
+    seeds_dir = package_dir / "seeds"
+    if seeds_dir.is_dir():
+        sync_seeds_to_graph(graph_manager, seeds_dir, settings.script_library_path)
 
 
-# Run auto-run seed scripts in background to populate graph on startup
-_seed_status: dict[str, dict] = {}  # filename -> {status, exit_code, error, started_at, finished_at}
-
-def _get_auto_run_seeds() -> list[str]:
-    """Return seed script filenames in dependency order (topological sort)."""
-    lib = settings.script_library_path
-    auto_seeds: dict[str, list[str]] = {}  # script_name -> depends_on
-    for meta_file in sorted(lib.glob("*.meta.json")):
+def _get_auto_run_seeds(settings: Settings) -> list[str]:
+    auto_seeds: dict[str, list[str]] = {}
+    for meta_file in sorted(settings.script_library_path.glob("*.meta.json")):
         try:
             meta = json.loads(meta_file.read_text(encoding="utf-8"))
-            if meta.get("auto_run"):
-                script_name = meta_file.name.replace(".meta.json", ".py")
-                if (lib / script_name).exists():
-                    deps = meta.get("depends_on", [])
-                    auto_seeds[script_name] = deps
         except Exception:
             continue
+        if meta.get("auto_run"):
+            script_name = meta_file.name.replace(".meta.json", ".py")
+            if (settings.script_library_path / script_name).exists():
+                auto_seeds[script_name] = meta.get("depends_on", [])
 
-    # Topological sort: only include dependencies that are in the auto_run set
-    graph: dict[str, set[str]] = {}
-    for name, deps in auto_seeds.items():
-        valid_deps = {d for d in deps if d in auto_seeds}
-        if len(valid_deps) < len(deps):
-            missing = set(deps) - valid_deps
-            logger.warning("seed_dep_not_auto_run", seed=name, missing=list(missing))
-        graph[name] = valid_deps
-
+    graph = {
+        name: {dependency for dependency in dependencies if dependency in auto_seeds}
+        for name, dependencies in auto_seeds.items()
+    }
     try:
-        sorter = graphlib.TopologicalSorter(graph)
-        ordered = list(sorter.static_order())
-    except graphlib.CycleError as e:
-        logger.error("seed_dependency_cycle", detail=str(e))
-        ordered = sorted(auto_seeds.keys())  # fallback to alphabetical
-
-    logger.info("auto_run_seed_order", order=ordered)
-    return ordered
+        return list(graphlib.TopologicalSorter(graph).static_order())
+    except graphlib.CycleError:
+        logger.exception("seed_dependency_cycle")
+        return sorted(auto_seeds)
 
 
-def _update_script_node(script_name: str, finished: str, exit_code: int):
-    """Update the Script graph node's last_run/last_exit_code after seed execution."""
+def _update_script_node(
+    graph_manager: GraphManager, script_name: str, finished: str, exit_code: int
+) -> None:
     try:
-        # `query()` defaults to read_only=True and rejects SET; use execute()
-        # for the write path.
         graph_manager.execute(
-            "MATCH (s:Script {filename: $fn}) SET s.last_run = $lr, s.last_exit_code = $ec",
+            "MATCH (s:Script {filename: $fn}) "
+            "SET s.last_run = $lr, s.last_exit_code = $ec",
             {"fn": script_name, "lr": finished, "ec": exit_code},
         )
     except Exception as exc:
         logger.debug("script_node_update_failed", filename=script_name, error=str(exc))
 
 
-def _bg_auto_run_seeds():
-    """Execute all auto_run seed scripts sequentially in a background thread."""
-    import time as _time
+def _run_auto_seeds(runtime: ServerRuntime, ipc_env: dict[str, str]) -> None:
+    import time
 
-    for script_name in _get_auto_run_seeds():
-        logger.info("auto_run_seed_start", filename=script_name)
-        started = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
-        _seed_status[script_name] = {"status": "running", "started_at": started}
+    for script_name in _get_auto_run_seeds(runtime.settings):
+        started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        runtime.seed_status[script_name] = {"status": "running", "started_at": started}
         try:
-            result_json = _run_script(settings, script_name)
-            result = json.loads(result_json)
+            result = json.loads(
+                _run_script(runtime.settings, script_name, ipc_env=ipc_env)
+            )
             exit_code = result.get("exit_code", -1)
-            finished = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
-            _update_script_node(script_name, finished, exit_code)
-            if exit_code == 0:
-                logger.info("auto_run_seed_done", filename=script_name)
-                _seed_status[script_name] = {
-                    "status": "success",
-                    "exit_code": 0,
-                    "started_at": started,
-                    "finished_at": finished,
-                }
-            else:
-                stderr = result.get("stderr", "")[:500]
-                logger.warning(
-                    "auto_run_seed_failed",
-                    filename=script_name,
-                    exit_code=exit_code,
-                    stderr=stderr,
-                )
-                _seed_status[script_name] = {
-                    "status": "failed",
-                    "exit_code": exit_code,
-                    "error": stderr or result.get("stdout", "")[:500],
-                    "started_at": started,
-                    "finished_at": finished,
-                }
-        except Exception as e:
-            finished = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
-            logger.warning("auto_run_seed_error", filename=script_name, error=str(e))
-            _seed_status[script_name] = {
-                "status": "error",
-                "error": str(e)[:500],
+            finished = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            _update_script_node(runtime.graph_manager, script_name, finished, exit_code)
+            runtime.seed_status[script_name] = {
+                "status": "success" if exit_code == 0 else "failed",
+                "exit_code": exit_code,
+                "error": (result.get("stderr") or result.get("stdout") or "")[:500],
                 "started_at": started,
                 "finished_at": finished,
             }
+        except Exception as exc:
+            runtime.seed_status[script_name] = {
+                "status": "error",
+                "error": str(exc)[:500],
+                "started_at": started,
+            }
 
-    # Log summary at startup
-    succeeded = sum(1 for s in _seed_status.values() if s["status"] == "success")
-    failed = sum(1 for s in _seed_status.values() if s["status"] != "success")
-    if failed:
-        logger.error(
-            "seed_startup_summary",
-            succeeded=succeeded,
-            failed=failed,
-            failures={k: v.get("error", "") for k, v in _seed_status.items() if v["status"] != "success"},
+
+def _download_compiler_artifacts(settings: Settings) -> None:
+    if not settings.compiler_tools:
+        return
+    if not (
+        settings.compiler_db_path == settings.graph_db_path
+        and settings.knowledge_projection == "v2"
+    ):
+        download_knowledge_db(
+            settings.knowledge_release_repo,
+            settings.compiler_db_path,
+            asset_name="knowledge_db_compiler.tar.gz",
+            archive_member="knowledge_db_compiler",
+            projection="v2",
+            manifest_name="compiler_manifest.json",
+            release_tag=settings.knowledge_release_tag,
+            require_digest=bool(settings.knowledge_release_repo),
+            logger=logger,
         )
-    else:
-        logger.info("seed_startup_summary", succeeded=succeeded, failed=0)
-
-
-# Register all components
-# In discovery-only mode we deliberately omit the tools that need live
-# Central / GreenLake credentials (call_central_api, call_greenlake_api)
-# and the execute_script tool — the agent designs and saves scripts that
-# the user reviews before running in a connected workspace.
-register_graph_tools(mcp, settings, graph_manager)
-if settings.compiler_tools:
-    register_compiler_tools(mcp, settings)
-    logger.info(
-        "compiler_tools_registered",
-        compiler_db_path=str(settings.compiler_db_path),
-        ast_db_path=str(settings.compiler_ast_db_path),
+    download_knowledge_db(
+        settings.knowledge_release_repo,
+        settings.compiler_ast_db_path,
+        asset_name="knowledge_db_ast.tar.gz",
+        archive_member="knowledge_db_ast",
+        projection="ast",
+        manifest_name="ast_manifest.json",
+        release_tag=settings.knowledge_release_tag,
+        require_digest=bool(settings.knowledge_release_repo),
+        logger=logger,
     )
-else:
-    logger.info("compiler_tools_disabled", reason="MCP_COMPILER_TOOLS not enabled")
-if settings.runtime_hydration:
-    register_runtime_hydration_tools(mcp, settings, graph_manager, client, glp_client)
-    logger.info("runtime_hydration_tools_registered", stage="executor")
-else:
-    logger.info("runtime_hydration_disabled", reason="MCP_RUNTIME_HYDRATION not enabled")
-register_script_tools(mcp, settings, graph_manager, offline_mode=_offline_mode)
-if _offline_mode:
-    logger.info(
-        "connected_tools_disabled",
-        reason="discovery_only_mode",
-        disabled=["execute_script", "call_central_api", "call_greenlake_api"],
+
+
+def create_server(
+    settings: Settings | None = None,
+    *,
+    validate_credentials: bool = True,
+    start_background: bool = True,
+) -> ServerRuntime:
+    """Build one configured server without import-time side effects."""
+    settings = settings or load_settings()
+    client, offline_mode = _create_central_client(
+        settings, validate_credentials=validate_credentials
     )
-else:
-    register_execution_tools(mcp, settings)
-    register_api_call_tools(mcp, settings, client, graph_manager)
-    if glp_client is not None:
-        register_greenlake_api_call_tools(mcp, settings, glp_client, graph_manager)
-    else:
-        logger.info("greenlake_tools_disabled", reason="GreenLake credentials not configured")
-register_resources(mcp, settings, graph_manager)
-register_api_catalog_resource(mcp, settings, graph_manager)
-register_graph_resources(mcp, graph_manager, lambda: _seed_status)
-register_prompts(mcp, graph_manager)
+    glp_client: GreenLakeClient | None = None
+    graph_manager: GraphManager | None = None
+    runtime: ServerRuntime | None = None
+    try:
+        knowledge_downloaded = _download_runtime_knowledge_db(settings)
+        if settings.knowledge_release_repo and not settings.graph_db_path.exists():
+            raise StartupError(
+                "Knowledge database is unavailable and no verified local cache exists."
+            )
+        _check_knowledge_pin(settings)
+        _download_compiler_artifacts(settings)
+        graph_manager, recovered = _initialize_runtime_graph(settings)
+        knowledge_downloaded = knowledge_downloaded or recovered
+        graph_manager.create_fts_indexes()
+        _check_knowledge_schema_version(settings)
 
-# Start auto-run seeds in background AFTER tools are registered. Skipped in
-# discovery-only mode because seeds populate the domain graph from live
-# Central / GreenLake APIs.
-if _offline_mode:
-    logger.info("auto_run_seeds_skipped", reason="discovery_only_mode")
-else:
-    threading.Thread(target=_bg_auto_run_seeds, daemon=True).start()
+        glp_client = _create_greenlake_client(
+            settings,
+            offline_mode=offline_mode,
+            validate_credentials=validate_credentials,
+        )
+        mcp = FastMCP(
+            "hpe-networking-central-mcp",
+            instructions=build_instructions(
+                read_only=settings.read_only,
+                api_tree=_load_api_tree(graph_manager, settings),
+                offline_mode=offline_mode,
+                workshop_mode=settings.workshop_mode,
+            ),
+        )
+        runtime = ServerRuntime(
+            settings=settings,
+            mcp=mcp,
+            graph_manager=graph_manager,
+            client=client,
+            glp_client=glp_client,
+            offline_mode=offline_mode,
+            knowledge_downloaded=knowledge_downloaded,
+        )
 
-logger.info(
-    "server_ready",
-    mode="discovery_only" if _offline_mode else "connected",
-    credentials_configured=settings.has_credentials,
-    glp_configured=glp_client is not None,
-    knowledge_db_loaded=knowledge_downloaded,
-    script_library=str(settings.script_library_path),
-    read_only=settings.read_only,
-)
+        register_graph_tools(mcp, settings, graph_manager)
+        if settings.workshop_mode:
+            for tool_name in _WORKSHOP_GRAPH_TOOLS_TO_REMOVE:
+                mcp.remove_tool(tool_name)
+            if client is not None:
+                register_workshop_api_call_tool(mcp, settings, client, graph_manager)
+            register_status_tool(
+                mcp,
+                settings,
+                graph_available=lambda: graph_manager.is_available,
+                connected=client is not None and validate_credentials,
+            )
+            register_api_catalog_resource(mcp, settings, graph_manager)
+            register_graph_resources(mcp, graph_manager, lambda: runtime.seed_status)
+        else:
+            _prepare_script_library(settings, graph_manager)
+            ipc_env: dict[str, str] | None = None
+            if client is not None and start_background:
+                runtime.ipc_server = GraphIPCServer(graph_manager)
+                runtime.ipc_server.start()
+                ipc_env = runtime.ipc_server.environment
+
+            register_script_tools(
+                mcp,
+                settings,
+                graph_manager,
+                offline_mode=offline_mode,
+                ipc_env=ipc_env,
+            )
+            if client is not None:
+                register_execution_tools(mcp, settings, ipc_env=ipc_env)
+                register_api_call_tools(mcp, settings, client, graph_manager)
+                if glp_client is not None:
+                    register_greenlake_api_call_tools(mcp, settings, glp_client, graph_manager)
+            if settings.compiler_tools:
+                from .tools.compiler import register_compiler_tools
+
+                register_compiler_tools(mcp, settings)
+            if settings.runtime_hydration:
+                from .tools.hydration import register_runtime_hydration_tools
+
+                register_runtime_hydration_tools(
+                    mcp, settings, graph_manager, client, glp_client
+                )
+            register_status_tool(
+                mcp,
+                settings,
+                graph_available=lambda: graph_manager.is_available,
+                connected=client is not None and validate_credentials,
+            )
+            register_resources(mcp, settings, graph_manager)
+            register_api_catalog_resource(mcp, settings, graph_manager)
+            register_graph_resources(mcp, graph_manager, lambda: runtime.seed_status)
+            register_prompts(mcp, graph_manager)
+            if client is not None and start_background and ipc_env is not None:
+                threading.Thread(
+                    target=_run_auto_seeds,
+                    args=(runtime, ipc_env),
+                    name="central-mcp-auto-seeds",
+                    daemon=True,
+                ).start()
+
+        logger.info(
+            "server_ready",
+            profile=settings.profile,
+            mode="discovery_only" if offline_mode else "connected",
+            credentials_configured=settings.has_credentials,
+            knowledge_db_loaded=knowledge_downloaded,
+            read_only=settings.read_only,
+        )
+        return runtime
+    except Exception:
+        if runtime is not None:
+            runtime.close()
+        else:
+            if glp_client is not None:
+                glp_client.close()
+            if client is not None:
+                client.close()
+            if graph_manager is not None:
+                graph_manager.close()
+        raise
 
 
-def main():
-    """Entry point for the MCP server."""
-    mcp.run(transport="stdio")
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="hpe-networking-central-mcp",
+        description="Run or diagnose the HPE Networking Central MCP server.",
+    )
+    parser.add_argument("command", nargs="?", choices=("serve", "doctor"), default="serve")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--profile", choices=("full", "workshop"), default=None)
+    parser.add_argument("--central-url", default=None)
+    parser.add_argument("--client-id", default=None)
+    parser.add_argument("--client-secret", default=None)
+    parser.add_argument("--glp-client-id", default=None)
+    parser.add_argument("--glp-client-secret", default=None)
+    parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--knowledge-release-tag", default=None)
+    parser.add_argument("--knowledge-sha256", default=None)
+    parser.add_argument(
+        "--skip-credentials",
+        action="store_true",
+        help="Doctor only: validate local runtime without contacting Central.",
+    )
+    return parser
+
+
+def _apply_cli_environment(args: argparse.Namespace) -> None:
+    mappings = {
+        "profile": "MCP_PROFILE",
+        "central_url": "CENTRAL_BASE_URL",
+        "client_id": "CENTRAL_CLIENT_ID",
+        "client_secret": "CENTRAL_CLIENT_SECRET",
+        "glp_client_id": "GREENLAKE_CLIENT_ID",
+        "glp_client_secret": "GREENLAKE_CLIENT_SECRET",
+        "knowledge_release_tag": "KNOWLEDGE_RELEASE_TAG",
+        "knowledge_sha256": "KNOWLEDGE_ASSET_SHA256",
+    }
+    for attr, env_name in mappings.items():
+        value = getattr(args, attr)
+        if value is not None:
+            os.environ[env_name] = value
+    if args.read_only:
+        os.environ["READ_ONLY"] = "true"
+
+
+def run_doctor(settings: Settings, *, skip_credentials: bool) -> int:
+    """Exercise the installed runtime and emit a secret-free JSON report."""
+    result = {
+        "status": "failed",
+        "profile": settings.profile,
+        "platform": platform.system(),
+        "architecture": platform.machine(),
+        "python": platform.python_version(),
+        "paths": {
+            "graph_db": str(settings.graph_db_path),
+            "script_library": str(settings.script_library_path),
+            "spec_cache": str(settings.spec_cache_path),
+        },
+        "credentials_checked": settings.has_credentials and not skip_credentials,
+    }
+    runtime: ServerRuntime | None = None
+    try:
+        if sys.version_info < (3, 12):
+            raise StartupError("Python 3.12 or newer is required")
+        runtime = create_server(
+            settings,
+            validate_credentials=not skip_credentials,
+            start_background=False,
+        )
+        result.update(
+            {
+                "status": "ready",
+                "graph_available": runtime.graph_manager.is_available,
+                "knowledge_release_tag": _local_knowledge_tag(settings),
+                "tool_count": len(runtime.mcp._tool_manager._tools),
+            }
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    except Exception as exc:
+        result["error"] = str(exc)
+        print(json.dumps(result, indent=2))
+        return 1
+    finally:
+        if runtime is not None:
+            runtime.close()
+
+
+def _local_knowledge_tag(settings: Settings) -> str | None:
+    manifest_path = settings.graph_db_path.parent / "manifest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    value = payload.get("release_tag")
+    return value if isinstance(value, str) else None
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    _apply_cli_environment(args)
+    try:
+        settings = load_settings()
+    except (TypeError, ValueError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    if args.command == "doctor":
+        return run_doctor(settings, skip_credentials=args.skip_credentials)
+
+    runtime: ServerRuntime | None = None
+    try:
+        runtime = create_server(settings)
+        runtime.mcp.run(transport="stdio")
+        return 0
+    except StartupError as exc:
+        logger.error("startup_failed", error=str(exc))
+        return 1
+    finally:
+        if runtime is not None:
+            runtime.close()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

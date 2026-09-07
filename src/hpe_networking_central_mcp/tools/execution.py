@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import structlog
 from mcp.types import ToolAnnotations
@@ -20,12 +20,16 @@ EXECUTION_TIMEOUT = 300  # 5 minutes
 
 
 def _run_script(
-    settings: Settings, filename: str, parameters: dict[str, str] | None = None
+    settings: Settings,
+    filename: str,
+    parameters: dict[str, str] | None = None,
+    *,
+    ipc_env: dict[str, str] | None = None,
 ) -> str:
     """Execute a script from the library and return JSON result.
 
     Shared implementation used by both execute_script() and save_script(execute=True).
-    Scripts access the graph database via IPC (Unix domain socket).
+    Scripts access the graph database through authenticated loopback IPC.
     """
     lib = settings.script_library_path
     script_path = lib / filename
@@ -49,12 +53,12 @@ def _run_script(
         return json.dumps({"error": "Only .py scripts can be executed."})
 
     # Build command
-    cmd = ["python3", str(script_path)]
+    cmd = [sys.executable, str(script_path)]
     if parameters:
         for key, value in parameters.items():
             cmd.extend([f"--{key}", str(value)])
 
-    env = _build_env(settings)
+    env = _build_env(settings, ipc_env=ipc_env)
     start_time = time.time()
 
     logger.info("script_execution_start", filename=filename, parameters=parameters)
@@ -101,7 +105,9 @@ def _run_script(
         return json.dumps({"error": f"Execution failed: {str(e)}"})
 
 
-def _build_env(settings: Settings) -> dict[str, str]:
+def _build_env(
+    settings: Settings, *, ipc_env: dict[str, str] | None = None
+) -> dict[str, str]:
     """Build environment variables dict for script execution."""
     env = os.environ.copy()
     env["CENTRAL_BASE_URL"] = settings.central_base_url
@@ -113,7 +119,15 @@ def _build_env(settings: Settings) -> dict[str, str]:
     env["GREENLAKE_CLIENT_SECRET"] = settings.effective_glp_client_secret
     env["GLP_BASE_URL"] = settings.glp_base_url
     env["GRAPH_DB_PATH"] = str(settings.graph_db_path)
-    env["GRAPH_IPC_SOCKET"] = str(settings.graph_ipc_socket)
+    for key in (
+        "GRAPH_IPC_HOST",
+        "GRAPH_IPC_PORT",
+        "GRAPH_IPC_TOKEN",
+        "GRAPH_IPC_SOCKET",
+    ):
+        env.pop(key, None)
+    if ipc_env:
+        env.update(ipc_env)
     # Propagate read-only mode so script subprocesses' HTTP clients refuse
     # mutating Central / GreenLake API calls (enforced in _http_core for the
     # central_helpers path, and at the httpx layer via the sitecustomize
@@ -135,7 +149,9 @@ def _build_env(settings: Settings) -> dict[str, str]:
     return env
 
 
-def register_execution_tools(mcp, settings: Settings):
+def register_execution_tools(
+    mcp, settings: Settings, *, ipc_env: dict[str, str] | None = None
+):
     """Register script execution tools with the MCP server."""
 
     @mcp.tool(
@@ -155,4 +171,4 @@ def register_execution_tools(mcp, settings: Settings):
         Returns:
             JSON with stdout, stderr, exit_code, and execution duration.
         """
-        return _run_script(settings, filename, parameters)
+        return _run_script(settings, filename, parameters, ipc_env=ipc_env)

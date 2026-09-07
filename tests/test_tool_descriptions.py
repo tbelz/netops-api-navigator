@@ -12,9 +12,7 @@ docstring fails CI before it ever ships.
 
 from __future__ import annotations
 
-import importlib
 import inspect
-import sys
 
 import pytest
 
@@ -24,42 +22,43 @@ DESCRIPTION_CHAR_LIMIT = 2100
 
 
 def _load_server_module(monkeypatch, tmp_path):
-    monkeypatch.setenv("CENTRAL_BASE_URL", "https://example.invalid")
-    monkeypatch.setenv("CENTRAL_CLIENT_ID", "test")
-    monkeypatch.setenv("CENTRAL_CLIENT_SECRET", "test")
-    monkeypatch.setenv("SCRIPT_LIBRARY_PATH", str(tmp_path / "scripts"))
-    monkeypatch.setenv("GRAPH_DB_PATH", str(tmp_path / "graph.db"))
-    monkeypatch.setenv("KNOWLEDGE_RELEASE_REPO", "")
+    from hpe_networking_central_mcp.config import Settings
+    from hpe_networking_central_mcp.server import create_server
 
-    from hpe_networking_central_mcp import central_client as cc
-
-    monkeypatch.setattr(cc.CentralClient, "validate", lambda self: None)
-    monkeypatch.setattr(cc.GreenLakeClient, "validate", lambda self: None)
-
-    _prev = sys.modules.get("hpe_networking_central_mcp.server")
-    if _prev is not None:
-        _ipc = getattr(_prev, "ipc_server", None)
-        if _ipc is not None:
-            _ipc.stop()
-    sys.modules.pop("hpe_networking_central_mcp.server", None)
-    return importlib.import_module("hpe_networking_central_mcp.server")
+    return create_server(
+        Settings(
+            central_base_url="https://example.invalid",
+            central_client_id="test",
+            central_client_secret="test",
+            script_library_path=tmp_path / "scripts",
+            graph_db_path=tmp_path / "graph.db",
+            docs_path=tmp_path / "docs",
+            spec_cache_path=tmp_path / "cache",
+            knowledge_release_repo="",
+        ),
+        validate_credentials=False,
+        start_background=False,
+    )
 
 
 def test_all_tool_descriptions_under_limit(monkeypatch, tmp_path):
     """Every registered FastMCP tool must have a description ≤2100 chars."""
-    module = _load_server_module(monkeypatch, tmp_path)
-    tool_mgr = getattr(module.mcp, "_tool_manager", None)
-    assert tool_mgr is not None, "FastMCP changed tool-manager attribute name"
+    runtime = _load_server_module(monkeypatch, tmp_path)
+    try:
+        tool_mgr = getattr(runtime.mcp, "_tool_manager", None)
+        assert tool_mgr is not None, "FastMCP changed tool-manager attribute name"
 
-    over_budget: list[tuple[str, int]] = []
-    for tool in tool_mgr._tools.values():
-        desc = (tool.description or "").strip()
-        # FastMCP renders the docstring through inspect.cleandoc when
-        # building the Tool object; mirror that here for parity in case a
-        # future release stops trimming.
-        cleaned = inspect.cleandoc(desc)
-        if len(cleaned) > DESCRIPTION_CHAR_LIMIT:
-            over_budget.append((tool.name, len(cleaned)))
+        over_budget: list[tuple[str, int]] = []
+        for tool in tool_mgr._tools.values():
+            desc = (tool.description or "").strip()
+            # FastMCP renders the docstring through inspect.cleandoc when
+            # building the Tool object; mirror that here for parity in case a
+            # future release stops trimming.
+            cleaned = inspect.cleandoc(desc)
+            if len(cleaned) > DESCRIPTION_CHAR_LIMIT:
+                over_budget.append((tool.name, len(cleaned)))
+    finally:
+        runtime.close()
 
     assert not over_budget, (
         "The following tool descriptions exceed the "

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from hpe_networking_central_mcp.config import load_settings
+from hpe_networking_central_mcp.config import Settings, load_settings
 
 pytestmark = pytest.mark.unit
 
@@ -67,3 +67,52 @@ def test_runtime_hydration_accepts_truthy_flag(monkeypatch):
     settings = load_settings()
 
     assert settings.runtime_hydration is True
+
+
+def test_native_defaults_are_user_scoped_and_enable_knowledge_download(monkeypatch):
+    for name in (
+        "GRAPH_DB_PATH",
+        "SCRIPT_LIBRARY_PATH",
+        "DOCS_PATH",
+        "SPEC_CACHE_DIR",
+        "KNOWLEDGE_RELEASE_REPO",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = load_settings()
+
+    assert not str(settings.graph_db_path).startswith("/data/")
+    assert not str(settings.script_library_path).startswith("/scripts/")
+    assert settings.knowledge_release_repo == "tbelz/hpe-networking-central-mcp"
+
+
+def test_workshop_profile_forces_fail_closed_settings(monkeypatch):
+    monkeypatch.setenv("MCP_PROFILE", "workshop")
+    monkeypatch.setenv("READ_ONLY", "false")
+    monkeypatch.setenv("MCP_COMPILER_TOOLS", "true")
+    monkeypatch.setenv("MCP_RUNTIME_HYDRATION", "true")
+
+    settings = load_settings()
+
+    assert settings.workshop_mode is True
+    assert settings.read_only is True
+    assert settings.compiler_tools is False
+    assert settings.runtime_hydration is False
+
+
+def test_knowledge_release_pin_is_loaded(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_RELEASE_TAG", "knowledge-db-pinned")
+    monkeypatch.setenv("KNOWLEDGE_ASSET_SHA256", "a" * 64)
+
+    settings = load_settings()
+
+    assert settings.knowledge_release_tag == "knowledge-db-pinned"
+    assert settings.knowledge_asset_sha256 == "a" * 64
+
+
+def test_knowledge_digest_is_normalized_and_validated():
+    settings = Settings(knowledge_asset_sha256=f"sha256:{'A' * 64}")
+    assert settings.knowledge_asset_sha256 == "a" * 64
+
+    with pytest.raises(ValueError, match="64-character"):
+        Settings(knowledge_asset_sha256="not-a-digest")

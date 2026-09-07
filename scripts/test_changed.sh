@@ -99,7 +99,7 @@ while IFS= read -r f; do
         pyproject.toml | uv.lock | tests/conftest.py)
             # Foundational changes — full fast loop (must precede tests/* glob)
             echo "Foundational change detected ($f); running full fast loop."
-            exec scripts/dev_test.sh
+            exec bash scripts/dev_test.sh
             ;;
         tests/*)
             # Only add test files that still exist (guard against renames/deletes)
@@ -113,7 +113,7 @@ done <<< "$CHANGED"
 # Dedupe
 if [ "${#TESTS[@]}" -eq 0 ]; then
     echo "No mapped tests for these changes; running full fast loop."
-    exec scripts/dev_test.sh
+    exec bash scripts/dev_test.sh
 fi
 
 UNIQUE_TESTS=$(printf '%s\n' "${TESTS[@]}" | sort -u | tr '\n' ' ')

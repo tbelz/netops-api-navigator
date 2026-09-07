@@ -252,11 +252,30 @@ inspection and reporting are permitted.
 """
 
 
+_WORKSHOP_INSTRUCTIONS = """🧪 WORKSHOP PROFILE — GET-ONLY 🧪
+
+This server is running directly on the participant's computer. Central
+credentials stay in the local process and must never be copied into source
+files, generated dashboards, chat responses, or logs.
+
+Only API discovery and authenticated Central GET requests are available:
+  • query_fts, query_api_schema, query_yang, query_graph, get_raw_schema
+  • call_central_api — GET only; no method or request-body argument exists
+  • get_server_status
+
+Script saving/execution, graph writes, GreenLake calls, compiler operations,
+runtime hydration, and startup seeds are deliberately unavailable. Never claim
+that a write was performed. Discover an endpoint before using it, keep live
+requests bounded, and treat returned tenant data as confidential.
+"""
+
+
 def build_instructions(
     *,
     read_only: bool,
     api_tree: str | None = None,
     offline_mode: bool = False,
+    workshop_mode: bool = False,
 ) -> str:
     """Return the MCP server instructions string.
 
@@ -273,9 +292,11 @@ def build_instructions(
     a search round-trip. ``read_only`` should already have been applied
     to the tree (i.e. non-GET endpoints filtered out) by the caller.
     """
-    text = _BASE_INSTRUCTIONS
+    text = _WORKSHOP_INSTRUCTIONS if workshop_mode else _BASE_INSTRUCTIONS
     if api_tree:
         text = text + _API_TREE_HEADER + api_tree
+    if workshop_mode:
+        return text
     if offline_mode:
         return _DISCOVERY_ONLY_BANNER + text
     if read_only:

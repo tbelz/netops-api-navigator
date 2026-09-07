@@ -56,7 +56,14 @@ def _validate_filename(filename: str) -> str | None:
     return None
 
 
-def register_script_tools(mcp, settings: Settings, graph_manager: GraphManager, offline_mode: bool = False):
+def register_script_tools(
+    mcp,
+    settings: Settings,
+    graph_manager: GraphManager,
+    offline_mode: bool = False,
+    *,
+    ipc_env: dict[str, str] | None = None,
+):
     """Register script library management tools with the MCP server."""
     global _graph_manager
     _graph_manager = graph_manager
@@ -270,7 +277,7 @@ def register_script_tools(mcp, settings: Settings, graph_manager: GraphManager, 
                         "Save the script, then run it from a connected workspace."
                     )
                 })
-            exec_result_json = _run_script(settings, filename, None)
+            exec_result_json = _run_script(settings, filename, None, ipc_env=ipc_env)
             exec_result = json.loads(exec_result_json)
             save_result["execution"] = exec_result
 

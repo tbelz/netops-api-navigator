@@ -31,7 +31,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential cmake
 
       - name: Install dependencies
-        run: uv sync --frozen --no-dev
+        run: uv sync --frozen --no-dev --extra compiler
 
       - name: Prime VSG cache from previous release
         env:

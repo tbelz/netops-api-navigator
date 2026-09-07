@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -22,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from hpe_networking_central_mcp._http_core import BaseHTTPClient, CentralAPIError
 from hpe_networking_central_mcp.config import Settings, load_settings
-from hpe_networking_central_mcp.graph.manager import GraphManager
 from hpe_networking_central_mcp.tools.execution import _build_env
 
 
@@ -145,6 +143,30 @@ class TestApiCallToolsReadOnly:
         with pytest.raises(ToolError) as exc_info:
             setup["call_greenlake_api"](path="some/path", method=method, body={"a": 1})
         assert "READ_ONLY" in str(exc_info.value).upper()
+
+
+class TestWorkshopApiTool:
+
+    def test_schema_has_no_method_or_body_and_batch_rejects_writes(self):
+        from mcp.server.fastmcp import FastMCP
+        from mcp.server.fastmcp.exceptions import ToolError
+        from hpe_networking_central_mcp.central_client import CentralClient
+        from hpe_networking_central_mcp.tools.api_call import register_workshop_api_call_tool
+
+        settings = Settings(
+            profile="workshop",
+            central_base_url="https://x",
+            central_client_id="cid",
+            central_client_secret="csec",
+        )
+        client = CentralClient("https://x", "cid", "csec")
+        mcp = FastMCP("test-workshop")
+        register_workshop_api_call_tool(mcp, settings, client, None)
+        tool = next(iter(mcp._tool_manager._tools.values()))
+
+        assert set(tool.parameters["properties"]) == {"path", "query_params", "calls"}
+        with pytest.raises(ToolError, match="GET"):
+            tool.fn(calls=[{"path": "x", "method": "POST", "body": {"x": 1}}])
 
 
 # ── _build_env propagation ──────────────────────────────────────────
@@ -342,3 +364,12 @@ class TestInstructionsBanner:
         from hpe_networking_central_mcp.instructions import build_instructions
         text = build_instructions(read_only=False)
         assert "READ_ONLY MODE ACTIVE" not in text.upper()
+
+    def test_workshop_instructions_do_not_advertise_mutating_surface(self):
+        from hpe_networking_central_mcp.instructions import build_instructions
+
+        text = build_instructions(read_only=True, workshop_mode=True)
+        assert "WORKSHOP PROFILE" in text
+        assert "GET-ONLY" in text
+        assert "write_graph" not in text
+        assert "execute_script" not in text

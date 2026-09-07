@@ -1,6 +1,6 @@
 [project]
 name = "hpe-networking-central-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP Server for HPE Aruba Networking Central — Code Interpreter Pattern"
 readme = "README.md"
 license = { text = "MIT" }
@@ -14,25 +14,32 @@ classifiers = [
     "Topic :: System :: Networking",
 ]
 dependencies = [
-    "mcp[cli]>=1.0.0,<2",
-    "pyyaml>=6.0",
+    "mcp>=1.0.0,<2",
     "structlog>=24.0",
     "httpx>=0.27",
     "real_ladybug>=0.15.3",
     "networkx>=3.0",
-    "pyarrow>=15.0",
-    "prance>=25.4.8.0",
-    "openapi-spec-validator>=0.9.0",
+    "platformdirs>=4.3",
 ]
 
 [project.scripts]
 hpe-networking-central-mcp = "hpe_networking_central_mcp.server:main"
 
 [project.optional-dependencies]
+compiler = [
+    "pyarrow>=15.0",
+    "prance>=25.4.8.0",
+    "openapi-spec-validator>=0.9.0",
+    "pyyaml>=6.0",
+]
 test = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-timeout>=2.3",
+    "pyarrow>=15.0",
+    "prance>=25.4.8.0",
+    "openapi-spec-validator>=0.9.0",
+    "pyyaml>=6.0",
 ]
 
 [build-system]

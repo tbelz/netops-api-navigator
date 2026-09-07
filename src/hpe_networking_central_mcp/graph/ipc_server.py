@@ -1,20 +1,17 @@
-"""Unix domain socket IPC server for graph database access.
+"""Authenticated loopback IPC for graph access from script subprocesses.
 
-Allows script subprocesses to query/execute Cypher against the LadybugDB database
-held open by the main MCP server process, avoiding file-lock conflicts.
-
-Protocol: newline-delimited JSON over a Unix domain socket.
-  Request:  {"id": N, "method": "query"|"execute", "cypher": "...", "params": {}}
-  Response: {"id": N, "result": [...]} | {"id": N, "error": "..."}
+The server deliberately uses TCP on ``127.0.0.1`` rather than Unix-domain
+sockets so the full MCP profile works unchanged on Windows and macOS. Each
+server start creates an unguessable capability token which every request must
+carry. The token and selected ephemeral port are passed only to child scripts.
 """
 
 from __future__ import annotations
 
 import json
-import os
+import secrets
 import socketserver
 import threading
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -26,10 +23,11 @@ logger = structlog.get_logger("graph.ipc_server")
 
 
 class _GraphRequestHandler(socketserver.StreamRequestHandler):
-    """Handle one IPC connection: read newline-delimited JSON requests."""
+    """Handle newline-delimited JSON requests from one child process."""
 
     def handle(self) -> None:
         manager: GraphManager = self.server.graph_manager  # type: ignore[attr-defined]
+        expected_token: str = self.server.capability_token  # type: ignore[attr-defined]
         for raw_line in self.rfile:
             line = raw_line.strip()
             if not line:
@@ -41,10 +39,13 @@ class _GraphRequestHandler(socketserver.StreamRequestHandler):
                 continue
 
             req_id = req.get("id")
+            if not secrets.compare_digest(str(req.get("token", "")), expected_token):
+                self._send({"id": req_id, "error": "Unauthorized graph IPC request"})
+                continue
+
             method = req.get("method", "")
             cypher = req.get("cypher", "")
             params = req.get("params") or {}
-
             if method not in ("query", "execute"):
                 self._send({"id": req_id, "error": f"Unknown method: {method}"})
                 continue
@@ -59,50 +60,67 @@ class _GraphRequestHandler(socketserver.StreamRequestHandler):
                 self._send({"id": req_id, "error": str(exc)})
 
     def _send(self, obj: dict) -> None:
-        data = json.dumps(obj, default=str) + "\n"
-        self.wfile.write(data.encode("utf-8"))
+        self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
         self.wfile.flush()
 
 
-class _ThreadedUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    allow_reuse_address = False
 
 
 class GraphIPCServer:
-    """Manages the lifecycle of the Unix domain socket IPC server."""
+    """Own an authenticated, loopback-only graph IPC endpoint."""
 
-    def __init__(self, socket_path: Path, graph_manager: GraphManager) -> None:
-        self._socket_path = socket_path
+    def __init__(self, graph_manager: GraphManager) -> None:
         self._graph_manager = graph_manager
-        self._server: _ThreadedUnixServer | None = None
+        self._token = secrets.token_urlsafe(32)
+        self._server: _ThreadedTCPServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
-    def socket_path(self) -> Path:
-        return self._socket_path
+    def host(self) -> str:
+        return "127.0.0.1"
+
+    @property
+    def port(self) -> int:
+        if self._server is None:
+            raise RuntimeError("Graph IPC server has not been started")
+        return int(self._server.server_address[1])
+
+    @property
+    def capability_token(self) -> str:
+        return self._token
+
+    @property
+    def environment(self) -> dict[str, str]:
+        """Environment values to inject into an authorized child process."""
+        return {
+            "GRAPH_IPC_HOST": self.host,
+            "GRAPH_IPC_PORT": str(self.port),
+            "GRAPH_IPC_TOKEN": self.capability_token,
+        }
 
     def start(self) -> None:
-        """Start listening on the Unix domain socket in a background thread."""
-        sock_str = str(self._socket_path)
-        # Clean up stale socket file
-        if self._socket_path.exists():
-            os.unlink(sock_str)
-        self._socket_path.parent.mkdir(parents=True, exist_ok=True)
-
-        self._server = _ThreadedUnixServer(sock_str, _GraphRequestHandler)
+        if self._server is not None:
+            return
+        self._server = _ThreadedTCPServer((self.host, 0), _GraphRequestHandler)
         self._server.graph_manager = self._graph_manager  # type: ignore[attr-defined]
-
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._server.capability_token = self._token  # type: ignore[attr-defined]
+        self._thread = threading.Thread(
+            target=self._server.serve_forever,
+            name="central-mcp-graph-ipc",
+            daemon=True,
+        )
         self._thread.start()
-        logger.info("graph_ipc_started", socket=sock_str)
+        logger.info("graph_ipc_started", host=self.host, port=self.port)
 
     def stop(self) -> None:
-        """Shut down the server and clean up the socket file."""
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
             self._server = None
-        if self._socket_path.exists():
-            os.unlink(str(self._socket_path))
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
         logger.info("graph_ipc_stopped")

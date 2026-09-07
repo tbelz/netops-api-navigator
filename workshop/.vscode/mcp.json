@@ -1,0 +1,49 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "central-url",
+      "description": "Central API URL (https://apigw-…central.arubanetworks.com)"
+    },
+    {
+      "type": "promptString",
+      "id": "central-client-id",
+      "description": "Central API Client ID"
+    },
+    {
+      "type": "promptString",
+      "id": "central-client-secret",
+      "description": "Central API Client Secret",
+      "password": true
+    }
+  ],
+  "servers": {
+    "hpe-central-workshop": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "tool",
+        "run",
+        "--python",
+        "3.12",
+        "--no-build",
+        "--constraints",
+        "${workspaceFolder}/constraints.txt",
+        "--from",
+        "hpe-networking-central-mcp==0.3.0",
+        "hpe-networking-central-mcp",
+        "--profile",
+        "workshop",
+        "--knowledge-release-tag",
+        "knowledge-db-20260907-043531",
+        "--knowledge-sha256",
+        "c9730faf52ecb99b6409d8777814982d684ffed7c673c4a749842cb520c8a56e"
+      ],
+      "env": {
+        "CENTRAL_BASE_URL": "${input:central-url}",
+        "CENTRAL_CLIENT_ID": "${input:central-client-id}",
+        "CENTRAL_CLIENT_SECRET": "${input:central-client-secret}"
+      }
+    }
+  }
+}
