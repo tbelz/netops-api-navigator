@@ -20,7 +20,7 @@ if ! command -v gh >/dev/null 2>&1; then
     exit 1
 fi
 
-TAG=$(gh release list --limit 20 --json tagName -q '.[] | select(.tagName | startswith("knowledge-db-")) | .tagName' | head -n1)
+TAG=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""')
 if [ -z "$TAG" ]; then
     echo "ERROR: no knowledge-db-* release found." >&2
     exit 1

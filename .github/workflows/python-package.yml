@@ -113,5 +113,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "${GITHUB_REF_NAME}" dist/*
-          --verify-tag --generate-notes
+          --verify-tag --generate-notes --latest=false
           --title "HPE Networking Central MCP ${GITHUB_REF_NAME}"
