@@ -1,4 +1,4 @@
-"""HPE Networking Central MCP server lifecycle and CLI."""
+"""NetOps API Navigator lifecycle and CLI."""
 
 from __future__ import annotations
 
@@ -395,7 +395,7 @@ def create_server(
             validate_credentials=validate_credentials,
         )
         mcp = FastMCP(
-            "hpe-networking-central-mcp",
+            "netops-api-navigator",
             instructions=build_instructions(
                 read_only=settings.read_only,
                 api_tree=_load_api_tree(graph_manager, settings),
@@ -471,7 +471,7 @@ def create_server(
                 threading.Thread(
                     target=_run_auto_seeds,
                     args=(runtime, ipc_env),
-                    name="central-mcp-auto-seeds",
+                    name="netops-api-navigator-auto-seeds",
                     daemon=True,
                 ).start()
 
@@ -499,8 +499,8 @@ def create_server(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="hpe-networking-central-mcp",
-        description="Run or diagnose the HPE Networking Central MCP server.",
+        prog="netops-api-navigator",
+        description="Run or diagnose the NetOps API Navigator.",
     )
     parser.add_argument("command", nargs="?", choices=("serve", "doctor"), default="serve")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

@@ -8,9 +8,9 @@ from pathlib import Path
 
 from platformdirs import PlatformDirs
 
-APP_NAME = "hpe-networking-central-mcp"
+APP_NAME = "netops-api-navigator"
 APP_AUTHOR = "tbelz"
-DEFAULT_KNOWLEDGE_RELEASE_REPO = "tbelz/hpe-networking-central-mcp"
+DEFAULT_KNOWLEDGE_RELEASE_REPO = "tbelz/netops-api-navigator"
 SUPPORTED_PROFILES = {"full", "workshop"}
 
 

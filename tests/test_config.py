@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from hpe_networking_central_mcp.config import Settings, load_settings
+from netops_api_navigator.config import Settings, load_settings
 
 pytestmark = pytest.mark.unit
 
@@ -83,7 +83,7 @@ def test_native_defaults_are_user_scoped_and_enable_knowledge_download(monkeypat
 
     assert not str(settings.graph_db_path).startswith("/data/")
     assert not str(settings.script_library_path).startswith("/scripts/")
-    assert settings.knowledge_release_repo == "tbelz/hpe-networking-central-mcp"
+    assert settings.knowledge_release_repo == "tbelz/netops-api-navigator"
 
 
 def test_workshop_profile_forces_fail_closed_settings(monkeypatch):

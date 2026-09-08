@@ -7,7 +7,7 @@ Python at interpreter startup and installs guards that refuse mutating
 HTTP requests via ``httpx`` (the library used by ``central_helpers``).
 
 This is a defence-in-depth layer on top of the ``BaseHTTPClient`` chokepoint
-in :mod:`hpe_networking_central_mcp._http_core` — it covers the case where
+in :mod:`netops_api_navigator._http_core` — it covers the case where
 a script bypasses ``central_helpers`` and instantiates an ``httpx.Client``
 directly. It does NOT make script execution a hard security boundary
 (scripts still receive OAuth credentials, so a script that uses

@@ -67,7 +67,7 @@ truth.
 
 ### Tier 2 — Post-flush invariants gate
 
-A new module `src/hpe_networking_central_mcp/graph/invariants.py`
+A new module `src/netops_api_navigator/graph/invariants.py`
 defines the invariants that every populated knowledge DB must
 satisfy:
 

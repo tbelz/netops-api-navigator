@@ -7,7 +7,7 @@ shipped past the previous (synthetic-only) suite: allOf+supportedDeviceType
 chains, oneOf service definitions, simple RPC bodies, and a GLP audit-log
 spec with cross-ref objects. They are NOT hand-edited; the test asserts
 the post-flush graph satisfies every invariant in
-:mod:`hpe_networking_central_mcp.graph.invariants`.
+:mod:`netops_api_navigator.graph.invariants`.
 
 This is the bug-class catcher mandated by ADR-011: when the
 ingestion code regresses, this test fails BEFORE the build script ever
@@ -30,18 +30,18 @@ if str(_SRC_DIR) not in sys.path:
 
 import real_ladybug as lb  # noqa: E402
 
-from hpe_networking_central_mcp.graph.invariants import (  # noqa: E402
+from netops_api_navigator.graph.invariants import (  # noqa: E402
     assert_graph_invariants,
     format_report,
 )
-from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
+from netops_api_navigator.graph.schema import (  # noqa: E402
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
     REL_TABLES,
 )
-from hpe_networking_central_mcp.oas_normalize import normalize as normalize_spec  # noqa: E402
-from hpe_networking_central_mcp.oas_schema_graph import (  # noqa: E402
+from netops_api_navigator.oas_normalize import normalize as normalize_spec  # noqa: E402
+from netops_api_navigator.oas_schema_graph import (  # noqa: E402
     collect_into_batch,
     flush_batch,
     new_batch,

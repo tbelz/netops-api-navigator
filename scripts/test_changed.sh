@@ -53,28 +53,28 @@ add_tests() {
 
 while IFS= read -r f; do
     case "$f" in
-        src/hpe_networking_central_mcp/compiler/*)
+        src/netops_api_navigator/compiler/*)
             add_tests "tests/test_compiler_*.py"
             add_tests "tests/test_projection_parity.py"
             ;;
-        src/hpe_networking_central_mcp/graph/*)
+        src/netops_api_navigator/graph/*)
             add_tests "tests/test_query_graph.py"
             add_tests "tests/test_schema_*.py"
             add_tests "tests/test_seed_integration.py"
             ;;
-        src/hpe_networking_central_mcp/tools/api_call*.py | src/hpe_networking_central_mcp/_http_core.py)
+        src/netops_api_navigator/tools/api_call*.py | src/netops_api_navigator/_http_core.py)
             add_tests "tests/test_api_call_*.py"
             ;;
-        src/hpe_networking_central_mcp/tools/scripts*.py)
+        src/netops_api_navigator/tools/scripts*.py)
             add_tests "tests/test_scripts_tool.py"
             add_tests "tests/test_execution.py"
             ;;
-        src/hpe_networking_central_mcp/oas_*.py | src/hpe_networking_central_mcp/api_tree.py)
+        src/netops_api_navigator/oas_*.py | src/netops_api_navigator/api_tree.py)
             add_tests "tests/test_oas_normalize.py"
             add_tests "tests/test_api_tree.py"
             add_tests "tests/test_endpoint_catalog_resource.py"
             ;;
-        src/hpe_networking_central_mcp/knowledge_db.py)
+        src/netops_api_navigator/knowledge_db.py)
             add_tests "tests/test_knowledge_db.py"
             ;;
         scripts/build_knowledge_db.py)
@@ -84,15 +84,21 @@ while IFS= read -r f; do
         scripts/report_compiler_traversal.py)
             add_tests "tests/test_compiler_traversal_report.py"
             ;;
-        src/hpe_networking_central_mcp/central_client.py)
+        scripts/build_workshop_bundle.py)
+            add_tests "tests/test_build_workshop_bundle.py"
+            ;;
+        scripts/verify_pypi_release.py)
+            add_tests "tests/test_verify_pypi_release.py"
+            ;;
+        src/netops_api_navigator/central_client.py)
             add_tests "tests/test_central_client.py"
             add_tests "tests/test_paginate.py"
             ;;
-        src/hpe_networking_central_mcp/server.py | src/hpe_networking_central_mcp/instructions.py)
+        src/netops_api_navigator/server.py | src/netops_api_navigator/instructions.py)
             add_tests "tests/test_server_imports.py"
             add_tests "tests/test_instructions_catalog.py"
             ;;
-        src/hpe_networking_central_mcp/seeds/*)
+        src/netops_api_navigator/seeds/*)
             add_tests "tests/test_monitoring_seed.py"
             add_tests "tests/test_seed_integration.py"
             ;;

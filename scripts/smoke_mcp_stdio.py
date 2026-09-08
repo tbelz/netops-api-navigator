@@ -66,7 +66,7 @@ def main() -> int:
         print(f"Missing MCP responses. stdout={completed.stdout!r}", file=sys.stderr)
         return 1
     server_name = initialize.get("result", {}).get("serverInfo", {}).get("name")
-    if server_name != "hpe-networking-central-mcp":
+    if server_name != "netops-api-navigator":
         print(f"Unexpected server name: {server_name!r}", file=sys.stderr)
         return 1
     tools = {tool["name"] for tool in tools_response.get("result", {}).get("tools", [])}

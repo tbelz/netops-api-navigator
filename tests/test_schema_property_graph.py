@@ -27,7 +27,7 @@ if str(_SRC_DIR) not in sys.path:
 
 import real_ladybug as lb  # noqa: E402
 
-from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
+from netops_api_navigator.graph.schema import (  # noqa: E402
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
@@ -167,7 +167,7 @@ def _seed_endpoint(conn, method: str, path: str) -> str:
 
 
 def _seed(conn) -> None:
-    from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+    from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
     spec = _make_ntp_like_spec()
     _seed_endpoint(conn, "POST", "/v1/ntp")
@@ -228,7 +228,7 @@ class TestPopulateProperties:
         assert rows[0]["yp"] == "/ac-ntp:ntp/ac-ntp:auth/ac-ntp:key-value"
 
     def test_extensions_json_preserves_other_x_keys(self, fresh_db):
-        from hpe_networking_central_mcp.oas_schema_graph import decode_json_blob
+        from netops_api_navigator.oas_schema_graph import decode_json_blob
 
         _, conn = fresh_db
         _seed(conn)
@@ -261,7 +261,7 @@ class TestPopulateProperties:
 
 class TestReadOnlyExtraction:
     def _seed_with_readonly(self, conn) -> None:
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         spec = {
             "openapi": "3.0.0",
@@ -513,7 +513,7 @@ class TestEvictionPreservesGraphIntegrity:
         }
 
     def _seed_both(self, conn) -> None:
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         _seed_endpoint(conn, "GET", "/v1/stub")
         populate_schema_graph(
@@ -650,7 +650,7 @@ def _make_inline_servers_spec() -> dict:
 
 
 def _seed_inline(conn) -> None:
-    from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+    from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
     spec = _make_inline_servers_spec()
     _seed_endpoint(conn, "POST", "/v1/ntp-servers")
@@ -739,7 +739,7 @@ class TestInlineSchemaMaterialisation:
         # Re-running populate against the same endpoint set must be a no-op
         # for the synthetic node — second insert would crash on PK collision
         # if the id were not deterministic.
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
         populate_schema_graph(
             conn,
             spec_source="central",
@@ -821,7 +821,7 @@ class TestSupportedDeviceTypesNullSemantic:
     def test_property_without_extension_is_null(self, fresh_db):
         _, conn = fresh_db
         _seed_endpoint(conn, "POST", "/v1/mixed")
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
         populate_schema_graph(
             conn,
             spec_source="central",
@@ -842,7 +842,7 @@ class TestSupportedDeviceTypesNullSemantic:
     def test_property_with_extension_keeps_list(self, fresh_db):
         _, conn = fresh_db
         _seed_endpoint(conn, "POST", "/v1/mixed")
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
         populate_schema_graph(
             conn,
             spec_source="central",
@@ -862,7 +862,7 @@ class TestSupportedDeviceTypesNullSemantic:
         "applies to every device"."""
         _, conn = fresh_db
         _seed_endpoint(conn, "POST", "/v1/mixed")
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
         populate_schema_graph(
             conn,
             spec_source="central",
@@ -919,7 +919,7 @@ class TestPopulatorWarningLogs:
                 }
             },
         }
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
         with structlog.testing.capture_logs() as cap:
             populate_schema_graph(
                 conn,

@@ -56,12 +56,12 @@ test_merge_*.py
 test_delete_create.py
 
 # Leftover seed copies from run_seed() (real seeds live in seeds/)
-src/hpe_networking_central_mcp/analyze_topology.*
-src/hpe_networking_central_mcp/enrich_topology.*
-src/hpe_networking_central_mcp/onboard_device.*
-src/hpe_networking_central_mcp/populate_base_graph.*
-src/hpe_networking_central_mcp/populate_config_policy.*
-src/hpe_networking_central_mcp/populate_monitoring.*
+src/netops_api_navigator/analyze_topology.*
+src/netops_api_navigator/enrich_topology.*
+src/netops_api_navigator/onboard_device.*
+src/netops_api_navigator/populate_base_graph.*
+src/netops_api_navigator/populate_config_policy.*
+src/netops_api_navigator/populate_monitoring.*
 
 # Claude local config
 .claude/

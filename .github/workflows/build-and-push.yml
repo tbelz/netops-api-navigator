@@ -156,7 +156,7 @@ jobs:
             timeout 30 docker run -i --rm "$IMAGE" | head -1 | python3 -c "
           import sys, json
           resp = json.loads(sys.stdin.readline())
-          assert resp.get('result', {}).get('serverInfo', {}).get('name') == 'hpe-networking-central-mcp', f'Unexpected response: {resp}'
+          assert resp.get('result', {}).get('serverInfo', {}).get('name') == 'netops-api-navigator', f'Unexpected response: {resp}'
           print('✅ MCP server responded correctly')
           " || echo "⚠️ MCP handshake verification could not complete (may be expected without credentials)"
 

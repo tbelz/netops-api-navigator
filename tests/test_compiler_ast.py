@@ -10,15 +10,15 @@ from tempfile import TemporaryDirectory
 import pytest
 import real_ladybug as lb
 
-from hpe_networking_central_mcp.compiler.ast_builder import (
+from netops_api_navigator.compiler.ast_builder import (
     UnknownKeywordError,
     build_ast_from_resolved,
     build_ast_graph,
     reconstruct_spec,
 )
-from hpe_networking_central_mcp.compiler.ast_schema import apply_ast_schema
-from hpe_networking_central_mcp.compiler.ast_writer import write_ast_graph
-from hpe_networking_central_mcp.compiler.frontend import ResolvedSpec, clean_spec, resolve_spec
+from netops_api_navigator.compiler.ast_schema import apply_ast_schema
+from netops_api_navigator.compiler.ast_writer import write_ast_graph
+from netops_api_navigator.compiler.frontend import ResolvedSpec, clean_spec, resolve_spec
 
 pytestmark = pytest.mark.compiler
 

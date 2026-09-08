@@ -7,8 +7,8 @@ import socket
 
 import pytest
 
-from hpe_networking_central_mcp.central_helpers import GraphHelper
-from hpe_networking_central_mcp.graph.ipc_server import GraphIPCServer
+from netops_api_navigator.central_helpers import GraphHelper
+from netops_api_navigator.graph.ipc_server import GraphIPCServer
 
 pytestmark = pytest.mark.unit
 

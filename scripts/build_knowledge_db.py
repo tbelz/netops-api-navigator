@@ -25,22 +25,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import real_ladybug as lb  # noqa: E402
 
-from hpe_networking_central_mcp.compiler.artifact_cache import (  # noqa: E402
+from netops_api_navigator.compiler.artifact_cache import (  # noqa: E402
     compiler_artifact_identity,
     load_reusable_compiler_stats,
 )
-from hpe_networking_central_mcp.compiler.ast_builder import (  # noqa: E402
+from netops_api_navigator.compiler.ast_builder import (  # noqa: E402
     build_ast_from_failure,
     build_ast_from_resolved,
 )
-from hpe_networking_central_mcp.compiler.ast_schema import apply_ast_schema  # noqa: E402
-from hpe_networking_central_mcp.compiler.ast_writer import (  # noqa: E402
+from netops_api_navigator.compiler.ast_schema import apply_ast_schema  # noqa: E402
+from netops_api_navigator.compiler.ast_writer import (  # noqa: E402
     write_ast_graphs,
 )
-from hpe_networking_central_mcp.compiler.catalog_identity import (  # noqa: E402
+from netops_api_navigator.compiler.catalog_identity import (  # noqa: E402
     CatalogIdentityRegistry,
 )
-from hpe_networking_central_mcp.compiler.frontend import (  # noqa: E402
+from netops_api_navigator.compiler.frontend import (  # noqa: E402
     ResolutionFailure,
     ResolvedSpec,
     load_resolution_cache,
@@ -48,32 +48,32 @@ from hpe_networking_central_mcp.compiler.frontend import (  # noqa: E402
     resolution_cache_fingerprint,
     write_resolution_cache,
 )
-from hpe_networking_central_mcp.compiler.projection_writer import (  # noqa: E402
+from netops_api_navigator.compiler.projection_writer import (  # noqa: E402
     CompilerProjectionData,
     build_compiler_projection_database_from_data,
     collect_compiler_projection_graph,
 )
-from hpe_networking_central_mcp.compiler.projection_parity import (  # noqa: E402
+from netops_api_navigator.compiler.projection_parity import (  # noqa: E402
     compute_projection_parity,
     format_projection_parity_report,
 )
-from hpe_networking_central_mcp.compiler.traversal_report import (  # noqa: E402
+from netops_api_navigator.compiler.traversal_report import (  # noqa: E402
     load_compiler_traversal_report,
 )
-from hpe_networking_central_mcp.compiler.semantic_builder import (  # noqa: E402
+from netops_api_navigator.compiler.semantic_builder import (  # noqa: E402
     build_semantic_overlay,
 )
-from hpe_networking_central_mcp.compiler.semantic_metrics import (  # noqa: E402
+from netops_api_navigator.compiler.semantic_metrics import (  # noqa: E402
     compute_semantic_metrics,
     merge_semantic_metrics,
 )
-from hpe_networking_central_mcp.compiler.semantic_schema import (  # noqa: E402
+from netops_api_navigator.compiler.semantic_schema import (  # noqa: E402
     apply_semantic_schema,
 )
-from hpe_networking_central_mcp.compiler.semantic_writer import (  # noqa: E402
+from netops_api_navigator.compiler.semantic_writer import (  # noqa: E402
     write_semantic_graphs,
 )
-from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
+from netops_api_navigator.graph.schema import (  # noqa: E402
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
@@ -81,27 +81,27 @@ from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
     REL_TABLES,
     TOPOLOGY_REL_TABLES,
 )
-from hpe_networking_central_mcp.oas_index import OASIndex  # noqa: E402
-from hpe_networking_central_mcp.oas_normalize import (  # noqa: E402
+from netops_api_navigator.oas_index import OASIndex  # noqa: E402
+from netops_api_navigator.oas_normalize import (  # noqa: E402
     normalize as normalize_spec,
 )
-from hpe_networking_central_mcp.oas_schema_graph import (  # noqa: E402
+from netops_api_navigator.oas_schema_graph import (  # noqa: E402
     collect_into_batch,
     flush_batch,
     new_batch,
     query_existing_eids,
 )
-from hpe_networking_central_mcp.graph.invariants import (  # noqa: E402
+from netops_api_navigator.graph.invariants import (  # noqa: E402
     InvariantViolation,
     assert_graph_invariants,
     format_report,
 )
-from hpe_networking_central_mcp.oas_scraper import ReadMeSpecProvider  # noqa: E402
-from hpe_networking_central_mcp.vsg_scraper import VsgDocProvider  # noqa: E402
+from netops_api_navigator.oas_scraper import ReadMeSpecProvider  # noqa: E402
+from netops_api_navigator.vsg_scraper import VsgDocProvider  # noqa: E402
 
 # GLP provider may fail if dependencies vary; import conditionally
 try:
-    from hpe_networking_central_mcp.glp_spec_provider import GreenLakeSpecProvider
+    from netops_api_navigator.glp_spec_provider import GreenLakeSpecProvider
 
     _HAS_GLP = True
 except ImportError:
@@ -668,7 +668,7 @@ def _print_build_report(db: lb.Database, schema_stats: dict, violations: list) -
     print(f"  Health:")
     print(f"    properties / named component  {props_per_named:>6.2f}")
     print(f"    named objects with no fields  {empty_named} ({empty_pct:.1f}%)")
-    from hpe_networking_central_mcp.graph.invariants import _CHECKS
+    from netops_api_navigator.graph.invariants import _CHECKS
     print(f"    invariant violations          {len(violations)} of {len(_CHECKS)}")
     del conn
 
@@ -1473,7 +1473,7 @@ def main() -> None:
 
     # 5. Populate seed scripts
     print("\n[5/6] Populating seed scripts...")
-    seeds_dir = Path(__file__).resolve().parent.parent / "src" / "hpe_networking_central_mcp" / "seeds"
+    seeds_dir = Path(__file__).resolve().parent.parent / "src" / "netops_api_navigator" / "seeds"
     if seeds_dir.is_dir():
         _populate_seeds(db, seeds_dir)
     else:

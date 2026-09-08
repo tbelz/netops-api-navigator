@@ -1,4 +1,4 @@
-"""Unit tests for ``hpe_networking_central_mcp.knowledge_db.download_knowledge_db``.
+"""Unit tests for ``netops_api_navigator.knowledge_db.download_knowledge_db``.
 
 Covers the extracted helper formerly inlined into ``server.py``. Uses
 ``httpx.MockTransport`` (no new dep) to drive the GitHub release API and the
@@ -15,8 +15,8 @@ import tarfile
 import httpx
 import pytest
 
-from hpe_networking_central_mcp import knowledge_db as kdb_mod
-from hpe_networking_central_mcp.knowledge_db import download_knowledge_db
+from netops_api_navigator import knowledge_db as kdb_mod
+from netops_api_navigator.knowledge_db import download_knowledge_db
 
 pytestmark = pytest.mark.unit
 

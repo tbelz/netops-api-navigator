@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "hpe-networking-central-mcp": {
+    "netops-api-navigator": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm", "--pull", "always",
         "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main",
+        "ghcr.io/tbelz/netops-api-navigator:main",
         "--central-url", "https://apigw-YOUR_CLUSTER.central.arubanetworks.com",
         "--client-id", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_ID",
         "--client-secret", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_SECRET",
@@ -13,12 +13,12 @@
         "--glp-client-secret", "REPLACE_WITH_YOUR_GLP_CLIENT_SECRET"
       ]
     },
-    "hpe-networking-central-mcp-readonly": {
+    "netops-api-navigator-readonly": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm", "--pull", "always",
         "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main",
+        "ghcr.io/tbelz/netops-api-navigator:main",
         "--central-url", "https://apigw-YOUR_CLUSTER.central.arubanetworks.com",
         "--client-id", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_ID",
         "--client-secret", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_SECRET",
@@ -27,12 +27,12 @@
         "--read-only"
       ]
     },
-    "hpe-networking-central-mcp-discovery-only": {
+    "netops-api-navigator-discovery-only": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm", "--pull", "always",
         "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main"
+        "ghcr.io/tbelz/netops-api-navigator:main"
       ]
     }
   }

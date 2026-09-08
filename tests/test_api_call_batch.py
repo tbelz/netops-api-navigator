@@ -13,10 +13,10 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from hpe_networking_central_mcp.central_client import CentralAPIError, CentralClient
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.graph.manager import GraphManager
-from hpe_networking_central_mcp.tools.api_call import register_api_call_tools
+from netops_api_navigator.central_client import CentralAPIError, CentralClient
+from netops_api_navigator.config import Settings
+from netops_api_navigator.graph.manager import GraphManager
+from netops_api_navigator.tools.api_call import register_api_call_tools
 
 
 # ── fixtures ────────────────────────────────────────────────────────

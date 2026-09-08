@@ -316,5 +316,6 @@ jobs:
             build/central-spec-cache.tar.gz
             build/compiler-task1-cache.json
           prerelease: false
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

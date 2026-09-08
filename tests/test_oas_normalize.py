@@ -5,13 +5,13 @@ from __future__ import annotations
 import copy
 import json
 
-from hpe_networking_central_mcp.oas_normalize import (
+from netops_api_navigator.oas_normalize import (
     normalize,
     project_components,
     project_glossary,
     project_skeleton,
 )
-from hpe_networking_central_mcp.oas_normalize import _SKELETON_STRIP_KEYS
+from netops_api_navigator.oas_normalize import _SKELETON_STRIP_KEYS
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

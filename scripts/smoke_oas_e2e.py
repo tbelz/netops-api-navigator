@@ -54,7 +54,7 @@ print("\n" + "=" * 70)
 print("Phase 1: OAS Scraper - live scrape from developer.arubanetworks.com")
 print("=" * 70)
 
-from hpe_networking_central_mcp.oas_scraper import (
+from netops_api_navigator.oas_scraper import (
     _extract_page_data,
     _discover_categories,
     _extract_oas,
@@ -147,7 +147,7 @@ print("\n" + "=" * 70)
 print("Phase 2: OAS Index - build, search, detail")
 print("=" * 70)
 
-from hpe_networking_central_mcp.oas_index import OASIndex
+from netops_api_navigator.oas_index import OASIndex
 
 _index = OASIndex()
 _index.build(_all_specs)
@@ -289,7 +289,7 @@ print("\n" + "=" * 70)
 print("Phase 4: Full MCP Server (subprocess stdio)")
 print("=" * 70)
 
-from hpe_networking_central_mcp.config import load_settings
+from netops_api_navigator.config import load_settings
 
 settings = load_settings()
 if not settings.has_credentials:
@@ -315,7 +315,7 @@ else:
         stdin_data = "\n".join(json.dumps(m) for m in messages) + "\n"
 
         proc = subprocess.Popen(
-            [sys.executable, "-m", "hpe_networking_central_mcp"],
+            [sys.executable, "-m", "netops_api_navigator"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

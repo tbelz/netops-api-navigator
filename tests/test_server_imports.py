@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from hpe_networking_central_mcp.config import Settings
+from netops_api_navigator.config import Settings
 
 pytestmark = pytest.mark.unit
 
@@ -34,9 +34,9 @@ def _tool_names(runtime) -> set[str]:
 def test_server_module_import_has_no_runtime_side_effects(monkeypatch, tmp_path):
     monkeypatch.setenv("GRAPH_DB_PATH", str(tmp_path / "must-not-exist"))
     monkeypatch.setenv("KNOWLEDGE_RELEASE_REPO", "")
-    sys.modules.pop("hpe_networking_central_mcp.server", None)
+    sys.modules.pop("netops_api_navigator.server", None)
 
-    module = importlib.import_module("hpe_networking_central_mcp.server")
+    module = importlib.import_module("netops_api_navigator.server")
 
     assert hasattr(module, "create_server")
     assert hasattr(module, "main")
@@ -45,7 +45,7 @@ def test_server_module_import_has_no_runtime_side_effects(monkeypatch, tmp_path)
 
 
 def test_connected_server_factory_registers_connected_tools(tmp_path):
-    from hpe_networking_central_mcp.server import create_server
+    from netops_api_navigator.server import create_server
 
     runtime = create_server(
         _settings(
@@ -68,7 +68,7 @@ def test_connected_server_factory_registers_connected_tools(tmp_path):
 
 
 def test_offline_full_profile_keeps_discovery_and_script_authoring(tmp_path):
-    from hpe_networking_central_mcp.server import create_server
+    from netops_api_navigator.server import create_server
 
     runtime = create_server(_settings(tmp_path), start_background=False)
     try:
@@ -84,7 +84,7 @@ def test_offline_full_profile_keeps_discovery_and_script_authoring(tmp_path):
 
 
 def test_server_registers_compiler_tools_when_enabled(tmp_path):
-    from hpe_networking_central_mcp.server import create_server
+    from netops_api_navigator.server import create_server
 
     runtime = create_server(
         _settings(tmp_path, compiler_tools=True),
@@ -99,7 +99,7 @@ def test_server_registers_compiler_tools_when_enabled(tmp_path):
 
 
 def test_server_registers_runtime_hydration_when_enabled(tmp_path):
-    from hpe_networking_central_mcp.server import create_server
+    from netops_api_navigator.server import create_server
 
     runtime = create_server(
         _settings(tmp_path, runtime_hydration=True),
@@ -120,7 +120,7 @@ def test_server_registers_runtime_hydration_when_enabled(tmp_path):
 
 
 def test_workshop_profile_exposes_only_safe_surface(tmp_path):
-    from hpe_networking_central_mcp.server import create_server
+    from netops_api_navigator.server import create_server
 
     runtime = create_server(
         _settings(
@@ -155,7 +155,7 @@ def test_workshop_profile_exposes_only_safe_surface(tmp_path):
 
 
 def test_explicit_knowledge_pin_rejects_stale_local_cache(tmp_path):
-    from hpe_networking_central_mcp.server import StartupError, _check_knowledge_pin
+    from netops_api_navigator.server import StartupError, _check_knowledge_pin
 
     settings = _settings(tmp_path, knowledge_release_tag="knowledge-db-expected")
     settings.graph_db_path.parent.mkdir(parents=True, exist_ok=True)

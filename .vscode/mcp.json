@@ -1,6 +1,6 @@
 {
   "servers": {
-    "hpe-networking-central-mcp": {
+    "netops-api-navigator": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
@@ -8,7 +8,7 @@
         "--env-file", "${workspaceFolder}/.env",
         "-e", "READ_ONLY=true",
         "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main"
+        "ghcr.io/tbelz/netops-api-navigator:main"
       ]
     }
   }

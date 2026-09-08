@@ -25,8 +25,8 @@ from typing import Any
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.resources.docs import register_api_catalog_resource
+from netops_api_navigator.config import Settings
+from netops_api_navigator.resources.docs import register_api_catalog_resource
 
 pytestmark = pytest.mark.unit
 

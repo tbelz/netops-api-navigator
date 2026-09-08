@@ -59,8 +59,8 @@ print("\n" + "=" * 70)
 print("Phase 1: Graph Schema — LadybugDB database")
 print("=" * 70)
 
-from hpe_networking_central_mcp.graph.manager import GraphManager
-from hpe_networking_central_mcp.graph.schema import (
+from netops_api_navigator.graph.manager import GraphManager
+from netops_api_navigator.graph.schema import (
     NODE_TABLES,
     REL_TABLES,
 )
@@ -119,7 +119,7 @@ else:
 _summary = {}
 
 if _has_creds:
-    from hpe_networking_central_mcp.central_client import CentralClient
+    from netops_api_navigator.central_client import CentralClient
 
     _client = CentralClient(base_url, client_id, client_secret)
 
@@ -336,7 +336,7 @@ print("\n" + "=" * 70)
 print("Phase 5: Topology — L2 link population and queries")
 print("=" * 70)
 
-from hpe_networking_central_mcp.graph.schema import TOPOLOGY_REL_TABLES
+from netops_api_navigator.graph.schema import TOPOLOGY_REL_TABLES
 
 if _has_creds and _gm.ready:
 

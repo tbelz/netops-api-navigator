@@ -109,7 +109,7 @@ class GraphIPCServer:
         self._server.capability_token = self._token  # type: ignore[attr-defined]
         self._thread = threading.Thread(
             target=self._server.serve_forever,
-            name="central-mcp-graph-ipc",
+            name="netops-api-navigator-graph-ipc",
             daemon=True,
         )
         self._thread.start()

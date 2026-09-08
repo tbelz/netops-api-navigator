@@ -17,9 +17,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from hpe_networking_central_mcp.graph.manager import GraphManager
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.tools.scripts import (
+from netops_api_navigator.graph.manager import GraphManager
+from netops_api_navigator.config import Settings
+from netops_api_navigator.tools.scripts import (
     _cypher_escape,
     _cypher_string_list,
     _validate_filename,
@@ -56,7 +56,7 @@ def settings(tmp_path):
 def tools(gm, settings):
     """Register script tools and return tool function dict."""
     from mcp.server.fastmcp import FastMCP
-    from hpe_networking_central_mcp.tools.scripts import register_script_tools
+    from netops_api_navigator.tools.scripts import register_script_tools
 
     mcp = FastMCP("test")
     register_script_tools(mcp, settings, gm)

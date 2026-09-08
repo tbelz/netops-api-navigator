@@ -16,8 +16,8 @@ import pytest
 import real_ladybug as lb
 import yaml
 
-from hpe_networking_central_mcp.compiler.ast_builder import UnknownKeywordError
-from hpe_networking_central_mcp.compiler.frontend import (
+from netops_api_navigator.compiler.ast_builder import UnknownKeywordError
+from netops_api_navigator.compiler.frontend import (
     ResolutionFailure,
     ResolutionResult,
     ResolvedSpec,

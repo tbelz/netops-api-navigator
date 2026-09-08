@@ -13,15 +13,15 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from hpe_networking_central_mcp.compiler.ast_builder import build_ast_graph
-from hpe_networking_central_mcp.compiler.ast_writer import build_ast_database
-from hpe_networking_central_mcp.compiler.projection_writer import (
+from netops_api_navigator.compiler.ast_builder import build_ast_graph
+from netops_api_navigator.compiler.ast_writer import build_ast_database
+from netops_api_navigator.compiler.projection_writer import (
     build_compiler_projection_database,
 )
-from hpe_networking_central_mcp.compiler.semantic_builder import build_semantic_overlay
-from hpe_networking_central_mcp.compiler.semantic_writer import write_semantic_database
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.tools.compiler import register_compiler_tools
+from netops_api_navigator.compiler.semantic_builder import build_semantic_overlay
+from netops_api_navigator.compiler.semantic_writer import write_semantic_database
+from netops_api_navigator.config import Settings
+from netops_api_navigator.tools.compiler import register_compiler_tools
 
 pytestmark = [pytest.mark.compiler, pytest.mark.unit]
 

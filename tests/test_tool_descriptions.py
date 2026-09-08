@@ -22,8 +22,8 @@ DESCRIPTION_CHAR_LIMIT = 2100
 
 
 def _load_server_module(monkeypatch, tmp_path):
-    from hpe_networking_central_mcp.config import Settings
-    from hpe_networking_central_mcp.server import create_server
+    from netops_api_navigator.config import Settings
+    from netops_api_navigator.server import create_server
 
     return create_server(
         Settings(

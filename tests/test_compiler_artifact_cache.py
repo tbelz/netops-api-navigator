@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from hpe_networking_central_mcp.compiler.artifact_cache import (
+from netops_api_navigator.compiler.artifact_cache import (
     compiler_artifact_identity,
     load_reusable_compiler_stats,
 )
@@ -31,7 +31,7 @@ def repo_tmp_path() -> Iterator[Path]:
 
 
 def _fake_repo(root: Path) -> None:
-    compiler_dir = root / "src" / "hpe_networking_central_mcp" / "compiler"
+    compiler_dir = root / "src" / "netops_api_navigator" / "compiler"
     compiler_dir.mkdir(parents=True)
     (compiler_dir / "builder.py").write_text("VERSION = 1\n", encoding="utf-8")
     scripts_dir = root / "scripts"
@@ -70,13 +70,13 @@ def test_artifact_identity_changes_with_corpus_source_or_implementation(
     changed_source[0]["_spec_source"] = "glp"
     assert compiler_artifact_identity(changed_source, repo_root=repo_root) != original
 
-    (repo_root / "src/hpe_networking_central_mcp/compiler/builder.py").write_text(
+    (repo_root / "src/netops_api_navigator/compiler/builder.py").write_text(
         "VERSION = 2\n",
         encoding="utf-8",
     )
     assert compiler_artifact_identity(specs, repo_root=repo_root) != original
 
-    nested_dir = repo_root / "src/hpe_networking_central_mcp/compiler/rules"
+    nested_dir = repo_root / "src/netops_api_navigator/compiler/rules"
     nested_dir.mkdir()
     nested_file = nested_dir / "yang.py"
     nested_file.write_text("VERSION = 1\n", encoding="utf-8")

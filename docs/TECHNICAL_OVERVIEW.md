@@ -1,4 +1,4 @@
-# HPE Networking Central MCP — Technical Overview
+# NetOps API Navigator — Technical Overview
 
 > Version: `0.3.0` · Python `≥ 3.12` · Transport: `stdio`
 
@@ -85,7 +85,7 @@ The server exposes three surfaces to MCP clients:
 ## 2. Repository Layout
 
 ```
-src/hpe_networking_central_mcp/
+src/netops_api_navigator/
 ├── server.py               # Entry point — wires all components, starts FastMCP
 ├── config.py               # Settings dataclass, loaded from environment
 ├── instructions.py         # Builds MCP system-instruction string
@@ -155,7 +155,7 @@ server.py  main() → load_settings() → create_server()
     │
     ├── _load_api_tree()             → MATCH ApiEndpoint → render_path_tree() → embed in instructions
     │
-    ├── FastMCP("hpe-networking-central-mcp", instructions=…)
+    ├── FastMCP("netops-api-navigator", instructions=…)
     ├── GraphIPCServer.start()       → authenticated loopback TCP in full connected mode
     │
     ├── GreenLakeClient.validate()   → optional, degrades gracefully
@@ -744,8 +744,8 @@ repository. `uv` installs a managed Python 3.12 runtime and the exact locked
 binary dependencies without requiring administrator rights, WSL, or Docker:
 
 ```bash
-uv tool install --python 3.12 --no-build --constraints constraints.txt hpe-networking-central-mcp==0.3.0
-hpe-networking-central-mcp doctor --profile workshop --skip-credentials
+uv tool install --python 3.12 --no-build --constraints constraints.txt netops-api-navigator==0.3.0
+netops-api-navigator doctor --profile workshop --skip-credentials
 ```
 
 Pull requests build and install the wheel on Windows x64, macOS Apple Silicon,
@@ -758,7 +758,7 @@ starter ZIP to a GitHub release.
 A `Dockerfile` is provided. The image entrypoint is:
 
 ```bash
-hpe-networking-central-mcp  # = python -m hpe_networking_central_mcp.server
+netops-api-navigator  # = python -m netops_api_navigator.server
 ```
 
 ### Claude Desktop / Claude Code
@@ -766,9 +766,9 @@ hpe-networking-central-mcp  # = python -m hpe_networking_central_mcp.server
 ```json
 {
   "mcpServers": {
-    "hpe-networking-central-mcp": {
+    "netops-api-navigator": {
       "command": "uvx",
-      "args": ["hpe-networking-central-mcp"],
+      "args": ["netops-api-navigator"],
       "env": {
         "CENTRAL_BASE_URL": "...",
         "CENTRAL_CLIENT_ID": "...",

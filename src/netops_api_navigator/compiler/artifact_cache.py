@@ -113,7 +113,7 @@ def _corpus_fingerprint(specs: list[dict[str, Any]]) -> str:
 def _implementation_fingerprint(repo_root: Path) -> str:
     digest = hashlib.sha256()
     digest.update(f"artifact-cache-v{_ARTIFACT_CACHE_VERSION}\n".encode())
-    compiler_dir = repo_root / "src" / "hpe_networking_central_mcp" / "compiler"
+    compiler_dir = repo_root / "src" / "netops_api_navigator" / "compiler"
     paths = sorted(compiler_dir.rglob("*.py"))
     paths.extend(
         path

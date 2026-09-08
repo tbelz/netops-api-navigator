@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from hpe_networking_central_mcp._http_core import (
+from netops_api_navigator._http_core import (
     BaseHTTPClient,
     CentralAPIError,
     AuthenticationError,
@@ -190,7 +190,7 @@ class TestRetry429:
             return resp_200
 
         with patch.object(client._http, "request", side_effect=mock_request), \
-             patch("hpe_networking_central_mcp._http_core.time.sleep") as mock_sleep:
+             patch("netops_api_navigator._http_core.time.sleep") as mock_sleep:
             result = client.get("/test")
 
         assert result == {"ok": True}
@@ -217,7 +217,7 @@ class TestRetry429:
         resp_429 = _api_response(429, {"errorCode": "RL"}, headers={"Retry-After": "1"})
 
         with patch.object(client._http, "request", return_value=resp_429), \
-             patch("hpe_networking_central_mcp._http_core.time.sleep"):
+             patch("netops_api_navigator._http_core.time.sleep"):
             with pytest.raises(RateLimitError):
                 client.get("/test")
 

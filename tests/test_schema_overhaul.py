@@ -22,13 +22,13 @@ if str(_SRC_DIR) not in sys.path:
 
 import real_ladybug as lb  # noqa: E402
 
-from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
+from netops_api_navigator.graph.schema import (  # noqa: E402
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
     REL_TABLES,
 )
-from hpe_networking_central_mcp.oas_schema_graph import (  # noqa: E402
+from netops_api_navigator.oas_schema_graph import (  # noqa: E402
     populate_schema_graph,
 )
 
@@ -468,7 +468,7 @@ class TestFollowRefRichnessAcrossScopes:
     """
 
     def test_richest_candidate_wins_when_pool_is_richer(self):
-        from hpe_networking_central_mcp.oas_normalize import _follow_ref
+        from netops_api_navigator.oas_normalize import _follow_ref
 
         local = {"schemas": {"Foo": {"type": "object"}}}
         pool = {
@@ -492,7 +492,7 @@ class TestFollowRefRichnessAcrossScopes:
         assert set(resolved["properties"]) == {"a", "b"}
 
     def test_local_wins_when_local_is_richer(self):
-        from hpe_networking_central_mcp.oas_normalize import _follow_ref
+        from netops_api_navigator.oas_normalize import _follow_ref
 
         local = {
             "schemas": {
@@ -510,7 +510,7 @@ class TestFollowRefRichnessAcrossScopes:
         assert resolved.get("properties", {}) == {"x": {"type": "string"}}
 
     def test_missing_in_both_returns_none(self):
-        from hpe_networking_central_mcp.oas_normalize import _follow_ref
+        from netops_api_navigator.oas_normalize import _follow_ref
 
         assert (
             _follow_ref(
@@ -520,7 +520,7 @@ class TestFollowRefRichnessAcrossScopes:
         )
 
     def test_external_ref_returns_none(self):
-        from hpe_networking_central_mcp.oas_normalize import _follow_ref
+        from netops_api_navigator.oas_normalize import _follow_ref
 
         assert (
             _follow_ref(
@@ -569,7 +569,7 @@ class TestInBatchReplacementEvictsDescendants:
         # triggers the in-batch in-place mutate path. The fix must
         # evict the previously-emitted (empty) property subgraph
         # bookkeeping so the rich body's properties get re-emitted.
-        from hpe_networking_central_mcp.oas_schema_graph import (
+        from netops_api_navigator.oas_schema_graph import (
             collect_into_batch,
             flush_batch,
             new_batch,
@@ -624,7 +624,7 @@ class TestInBatchReplacementEvictsDescendants:
         _seed_endpoint(conn, "POST", "/v1/stub")
         _seed_endpoint(conn, "POST", "/v1/rich")
 
-        from hpe_networking_central_mcp.oas_schema_graph import (
+        from netops_api_navigator.oas_schema_graph import (
             collect_into_batch,
             flush_batch,
             new_batch,

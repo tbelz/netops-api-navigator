@@ -1519,7 +1519,7 @@ def _richness(body_json: str) -> int:
     """Comparable richness score for richest-wins merge.
 
     Bodies are scored on the JSON-serialised payload length so the
-    metric matches :func:`hpe_networking_central_mcp.oas_normalize.schema_richness`
+    metric matches :func:`netops_api_navigator.oas_normalize.schema_richness`
     used during ref resolution.
     """
     return len(body_json or "")

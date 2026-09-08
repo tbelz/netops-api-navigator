@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from hpe_networking_central_mcp.compiler.ast_builder import build_ast_graph
-from hpe_networking_central_mcp.compiler.frontend import clean_spec
-from hpe_networking_central_mcp.compiler.semantic_builder import (
+from netops_api_navigator.compiler.ast_builder import build_ast_graph
+from netops_api_navigator.compiler.frontend import clean_spec
+from netops_api_navigator.compiler.semantic_builder import (
     IDENTITY_RULE_PACK_ID,
     STRUCTURAL_RULE_PACK_ID,
     SemanticEdge,
@@ -18,7 +18,7 @@ from hpe_networking_central_mcp.compiler.semantic_builder import (
     build_semantic_overlay,
     _internal_ref_pointer,
 )
-from hpe_networking_central_mcp.compiler.semantic_metrics import (
+from netops_api_navigator.compiler.semantic_metrics import (
     compute_semantic_metrics,
     merge_semantic_metrics,
 )

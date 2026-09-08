@@ -1,8 +1,8 @@
-# HPE Networking Central MCP Server
+# NetOps API Navigator
 
-[![Build](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/build-and-push.yml)
-[![Python Package](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/python-package.yml/badge.svg)](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/python-package.yml)
-[![Knowledge DB](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/update-knowledge-db.yml/badge.svg)](https://github.com/tbelz/hpe-networking-central-mcp/actions/workflows/update-knowledge-db.yml)
+[![Build](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml)
+[![Python Package](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml/badge.svg)](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml)
+[![Knowledge DB](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml/badge.svg)](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 
@@ -10,6 +10,12 @@ MCP server for **HPE Aruba Networking Central** and the **HPE GreenLake Platform
 It gives an MCP client a graph-backed API catalog, live Central/GreenLake API
 calls when credentials are configured, and a reusable Python script library for
 network automation workflows.
+
+> [!IMPORTANT]
+> NetOps API Navigator is an independent community project. It is not affiliated
+> with, sponsored by, endorsed by, or supported by Hewlett Packard Enterprise.
+> HPE Aruba Networking Central and HPE GreenLake Platform are referenced solely
+> to describe compatibility. All trademarks belong to their respective owners.
 
 The current agent-facing discovery surface is graph-first. Routine endpoint,
 schema, CLI/YANG, and topology lookup should use the focused graph aliases
@@ -88,24 +94,27 @@ Prerequisites:
 - Optional GreenLake Platform credentials, otherwise GreenLake uses the Central
   credentials when possible.
 
-### Native Python Installation (Windows x64 and Apple Silicon)
+### Native Python Installation (Windows x64, Apple Silicon, and Linux x64)
 
 This is the production path for local use without Docker or WSL. It runs the
 server directly on the host and stores data in the operating system's normal
 per-user application directories.
 
-Install `uv` with `winget install --id=astral-sh.uv -e` on Windows or
-`brew install uv` on macOS, then install the pinned server release:
+Install `uv` with `winget install --id=astral-sh.uv -e` on Windows,
+`brew install uv` on macOS, or the
+[documented installer](https://docs.astral.sh/uv/getting-started/installation/)
+on Linux, then install the exact release from PyPI:
 
 ```text
-uv tool install --python 3.12 --no-build --constraints constraints.txt hpe-networking-central-mcp==0.3.0
-hpe-networking-central-mcp doctor --profile workshop --skip-credentials
+uv tool install --python 3.12 --no-build netops-api-navigator==0.3.0
+netops-api-navigator doctor --profile workshop --skip-credentials
 ```
 
 `uv` installs Python 3.12 when it is not already available. The GitHub release
 contains the wheel, locked `constraints.txt`, checksums, source archive, and a
-ready-to-open VS Code workshop bundle. Separate `.msi`, `.exe`, or `.pkg`
-installers are intentionally not required.
+ready-to-open VS Code workshop bundle with all supported-platform dependency
+wheels. The bundle does not need PyPI access after download. Separate `.msi`,
+`.exe`, or `.pkg` installers are intentionally not required.
 
 The starter configuration is documented in [`workshop/README.md`](workshop/README.md).
 It prompts for credentials through VS Code password inputs and launches the
@@ -120,12 +129,12 @@ registered in this mode.
 ```json
 {
   "mcpServers": {
-    "hpe-networking-central-mcp-discovery": {
+    "netops-api-navigator-discovery": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm", "--pull", "always",
         "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main"
+        "ghcr.io/tbelz/netops-api-navigator:main"
       ]
     }
   }
@@ -140,12 +149,12 @@ startup, and `execute_script`.
 ```json
 {
   "mcpServers": {
-    "hpe-networking-central-mcp": {
+    "netops-api-navigator": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm", "--pull", "always",
         "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main",
+        "ghcr.io/tbelz/netops-api-navigator:main",
         "--central-url", "https://apigw-YOUR_CLUSTER.central.arubanetworks.com",
         "--client-id", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_ID",
         "--client-secret", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_SECRET",
@@ -248,7 +257,7 @@ and—when valid Central credentials are present—GET-only Central API calls. I
 does not register script creation or execution, local graph writes, GreenLake,
 runtime hydration, compiler tools, prompts, or automatic seed jobs.
 
-Run `hpe-networking-central-mcp doctor --profile workshop` before connecting an
+Run `netops-api-navigator doctor --profile workshop` before connecting an
 MCP client. Add `--skip-credentials` to validate only the local installation.
 The prebuilt [`workshop/`](workshop/) starter is included as a ZIP in tagged
 GitHub releases.
@@ -262,16 +271,16 @@ the compiler/v2 runtime graph and enable the remaining compiler diagnostics:
 ```json
 {
   "mcpServers": {
-    "hpe-networking-central-mcp-v2-smoke": {
+    "netops-api-navigator-v2-smoke": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm", "--pull", "always",
-        "-v", "central-mcp-v2-data:/data",
+        "-v", "netops-api-navigator-v2-data:/data",
         "-v", "central-scripts:/scripts/library",
-        "-e", "KNOWLEDGE_RELEASE_REPO=tbelz/hpe-networking-central-mcp",
+        "-e", "KNOWLEDGE_RELEASE_REPO=tbelz/netops-api-navigator",
         "-e", "MCP_KNOWLEDGE_PROJECTION=v2",
         "-e", "MCP_COMPILER_TOOLS=true",
-        "ghcr.io/tbelz/hpe-networking-central-mcp:main"
+        "ghcr.io/tbelz/netops-api-navigator:main"
       ]
     }
   }
@@ -398,7 +407,7 @@ Use `uv` for local Python commands.
 
 ```bash
 uv sync
-uv run hpe-networking-central-mcp
+uv run netops-api-navigator
 ```
 
 Fast local test loops:
@@ -417,7 +426,7 @@ uv run pytest
 Build the Docker image locally:
 
 ```bash
-docker build -t hpe-networking-central-mcp .
+docker build -t netops-api-navigator .
 ```
 
 ## Python Releases

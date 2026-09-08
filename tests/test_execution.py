@@ -15,8 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.tools.execution import (
+from netops_api_navigator.config import Settings
+from netops_api_navigator.tools.execution import (
     _build_env,
     _run_script,
     EXECUTION_TIMEOUT,
@@ -104,7 +104,7 @@ class TestRunScript:
         mock_result.stdout = "hello world\n"
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result):
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result):
             result = json.loads(_run_script(settings, "hello.py"))
 
         assert result["exit_code"] == 0
@@ -133,7 +133,7 @@ class TestRunScript:
         mock_result.stdout = ""
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
             _run_script(settings, "hello.py", {"site": "NYC", "device": "SW01"})
 
         cmd = mock_run.call_args[0][0]
@@ -147,7 +147,7 @@ class TestRunScript:
         import subprocess
 
         with patch(
-            "hpe_networking_central_mcp.tools.execution.subprocess.run",
+            "netops_api_navigator.tools.execution.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="python3 hello.py", timeout=300),
         ):
             result = json.loads(_run_script(settings, "hello.py"))
@@ -161,7 +161,7 @@ class TestRunScript:
         mock_result.stdout = "x" * 20000
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result):
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result):
             result = json.loads(_run_script(settings, "hello.py"))
 
         assert result["truncated"] is True
@@ -173,7 +173,7 @@ class TestRunScript:
         mock_result.stdout = ""
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
             _run_script(settings, "hello.py")
 
         call_kwargs = mock_run.call_args[1]
@@ -189,7 +189,7 @@ class TestExecuteScriptTool:
 
     def test_tool_registered(self, settings):
         from mcp.server.fastmcp import FastMCP
-        from hpe_networking_central_mcp.tools.execution import register_execution_tools
+        from netops_api_navigator.tools.execution import register_execution_tools
 
         mcp = FastMCP("test")
         register_execution_tools(mcp, settings)

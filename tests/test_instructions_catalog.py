@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from hpe_networking_central_mcp.api_tree import render_path_tree
-from hpe_networking_central_mcp.instructions import (
+from netops_api_navigator.api_tree import render_path_tree
+from netops_api_navigator.instructions import (
     _API_TREE_HEADER,
     _BASE_INSTRUCTIONS,
     _READONLY_BANNER,

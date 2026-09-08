@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 import httpx
 
-_DEFAULT_LOGGER = logging.getLogger("hpe_networking_central_mcp.knowledge_db")
+_DEFAULT_LOGGER = logging.getLogger("netops_api_navigator.knowledge_db")
 
 # How long to wait for the GitHub release-info API call. Kept short so a
 # spotty network does not eat the MCP client's ``initialize`` budget on

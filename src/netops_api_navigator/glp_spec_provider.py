@@ -9,7 +9,7 @@ Discovery flow:
     2. For each service, fetch its sidebar JSON to find OpenAPI spec names.
     3. Download each spec via ``_bundle/…/index.json?download``.
 
-Implements the :class:`~hpe_networking_central_mcp.spec_provider.SpecProvider`
+Implements the :class:`~netops_api_navigator.spec_provider.SpecProvider`
 protocol.
 """
 
@@ -303,7 +303,7 @@ class GreenLakeSpecProvider:
     """SpecProvider that fetches native OpenAPI specs from the GreenLake portal.
 
     Conforms to the
-    :class:`~hpe_networking_central_mcp.spec_provider.SpecProvider` protocol.
+    :class:`~netops_api_navigator.spec_provider.SpecProvider` protocol.
     """
 
     def __init__(self, included_slugs: set[str] | None = None) -> None:

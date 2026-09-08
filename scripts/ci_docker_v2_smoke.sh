@@ -2,11 +2,11 @@
 set -euo pipefail
 
 IMAGE="${1:?image name required}"
-REPO="${2:-${GITHUB_REPOSITORY:-tbelz/hpe-networking-central-mcp}}"
+REPO="${2:-${GITHUB_REPOSITORY:-tbelz/netops-api-navigator}}"
 
 mkdir -p tmp
 
-VOL="central-mcp-v2-smoke-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
+VOL="netops-api-navigator-v2-smoke-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
 OUT="tmp/v2-smoke-stdout-$$.log"
 ERR="tmp/v2-smoke-stderr-$$.log"
 

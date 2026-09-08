@@ -18,7 +18,7 @@
     }
   ],
   "servers": {
-    "hpe-central-workshop": {
+    "netops-api-navigator-workshop": {
       "type": "stdio",
       "command": "uv",
       "args": [
@@ -29,9 +29,12 @@
         "--no-build",
         "--constraints",
         "${workspaceFolder}/constraints.txt",
+        "--no-index",
+        "--find-links",
+        "${workspaceFolder}/wheelhouse",
         "--from",
-        "hpe-networking-central-mcp==0.3.0",
-        "hpe-networking-central-mcp",
+        "${workspaceFolder}/__PROJECT_WHEEL__",
+        "netops-api-navigator",
         "--profile",
         "workshop",
         "--knowledge-release-tag",

@@ -23,13 +23,15 @@ import pytest
 # without requiring an editable install.
 import sys
 
-_SRC_DIR = Path(__file__).resolve().parent.parent / "src"
-if str(_SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(_SRC_DIR))
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+for import_path in (_REPO_ROOT, _SRC_DIR):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
-from hpe_networking_central_mcp.config import Settings, load_settings  # noqa: E402
-from hpe_networking_central_mcp.graph.ipc_server import GraphIPCServer  # noqa: E402
-from hpe_networking_central_mcp.graph.manager import GraphManager  # noqa: E402
+from netops_api_navigator.config import Settings, load_settings  # noqa: E402
+from netops_api_navigator.graph.ipc_server import GraphIPCServer  # noqa: E402
+from netops_api_navigator.graph.manager import GraphManager  # noqa: E402
 
 
 # ── Dataclasses ─────────────────────────────────────────────────────
@@ -198,7 +200,7 @@ def seed_infra():
     if not settings.has_credentials:
         pytest.skip("Central credentials not configured — set CENTRAL_BASE_URL etc. in .env")
 
-    pkg_dir = _SRC_DIR / "hpe_networking_central_mcp"
+    pkg_dir = _SRC_DIR / "netops_api_navigator"
     seeds_dir = pkg_dir / "seeds"
 
     with TemporaryDirectory(prefix="seed_test_") as tmp:

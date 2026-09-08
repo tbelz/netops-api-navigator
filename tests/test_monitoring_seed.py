@@ -178,7 +178,7 @@ def seed_module():
     sys.modules["central_helpers"] = mock_ch
 
     # Add seeds dir to path
-    seeds_dir = str(Path(__file__).parent.parent / "src" / "hpe_networking_central_mcp" / "seeds")
+    seeds_dir = str(Path(__file__).parent.parent / "src" / "netops_api_navigator" / "seeds")
     sys.path.insert(0, seeds_dir)
 
     try:
@@ -425,7 +425,7 @@ class TestMetaJSON:
         meta_path = (
             Path(__file__).parent.parent
             / "src"
-            / "hpe_networking_central_mcp"
+            / "netops_api_navigator"
             / "seeds"
             / "populate_monitoring.meta.json"
         )
@@ -435,7 +435,7 @@ class TestMetaJSON:
         meta_path = (
             Path(__file__).parent.parent
             / "src"
-            / "hpe_networking_central_mcp"
+            / "netops_api_navigator"
             / "seeds"
             / "populate_monitoring.meta.json"
         )
@@ -446,7 +446,7 @@ class TestMetaJSON:
         meta_path = (
             Path(__file__).parent.parent
             / "src"
-            / "hpe_networking_central_mcp"
+            / "netops_api_navigator"
             / "seeds"
             / "populate_monitoring.meta.json"
         )

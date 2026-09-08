@@ -27,7 +27,7 @@ if str(_SRC_DIR) not in sys.path:
 
 import real_ladybug as lb  # noqa: E402
 
-from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
+from netops_api_navigator.graph.schema import (  # noqa: E402
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
@@ -224,10 +224,10 @@ class TestPopulateSchemaGraph:
     Response / SchemaComponent rows."""
 
     def test_helper_is_importable(self):
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph  # noqa: F401
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph  # noqa: F401
 
     def test_populates_parameter_rows(self, fresh_db):
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()
@@ -255,7 +255,7 @@ class TestPopulateSchemaGraph:
     def test_parameter_description_is_persisted(self, fresh_db):
         """Phase 2E-2: Parameter.description must be extracted so glossary
         retirement doesn't lose human-readable parameter docs."""
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()
@@ -279,7 +279,7 @@ class TestPopulateSchemaGraph:
         assert by_name["scopeId"] == ""
 
     def test_populates_schema_components_with_named_ids(self, fresh_db):
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()
@@ -305,7 +305,7 @@ class TestPopulateSchemaGraph:
         assert widget["src"] == "central"
 
     def test_request_body_links_to_root_component(self, fresh_db):
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()
@@ -330,7 +330,7 @@ class TestPopulateSchemaGraph:
         assert rows[0]["ct"] == "application/json"
 
     def test_references_carry_via_property(self, fresh_db):
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()
@@ -354,7 +354,7 @@ class TestPopulateSchemaGraph:
         assert by_name.get("TagEnum") == "items"
 
     def test_response_links_to_root_component(self, fresh_db):
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()
@@ -377,7 +377,7 @@ class TestPopulateSchemaGraph:
 
     def test_idempotent_population(self, fresh_db):
         """Running populate twice must not double-insert rows."""
-        from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+        from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
         db, conn = fresh_db
         spec = _make_synthetic_spec()

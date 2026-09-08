@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from hpe_networking_central_mcp.tools.api_call_validation import (
+from netops_api_navigator.tools.api_call_validation import (
     ValidationResult,
     eid_for,
     format_validation_error,
