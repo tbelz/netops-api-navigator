@@ -3,7 +3,7 @@
     {
       "type": "promptString",
       "id": "central-url",
-      "description": "Central API URL (https://apigw-…central.arubanetworks.com)"
+      "description": "Copy the Base URL from Central: Menu > API Gateway > REST API"
     },
     {
       "type": "promptString",

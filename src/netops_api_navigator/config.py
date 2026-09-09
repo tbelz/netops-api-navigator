@@ -31,8 +31,9 @@ class Settings:
     """Server settings loaded from environment variables.
 
     ``workshop`` is a fail-closed profile. Constructing settings for that
-    profile always enables read-only mode and disables every optional surface
-    that can mutate local state or execute code.
+    profile always enables network read-only mode and disables user-controlled
+    code execution and local graph mutation. Bundled GET-only topology seeds
+    may still update the local graph through the server's private runtime.
     """
 
     profile: str = "full"

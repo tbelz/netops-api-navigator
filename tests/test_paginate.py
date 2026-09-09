@@ -89,3 +89,38 @@ class TestPaginateHardFail:
 
         out = api.paginate("/dummy", max_pages=5)
         assert out == [{"i": 1}]
+
+    def test_raises_when_max_pages_hit_without_server_total(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(return_value={"aps": [{"i": 1}]})
+
+        with pytest.raises(helpers.PaginationError) as exc:
+            api.paginate("/dummy", max_pages=2)
+        assert exc.value.error_code == "PAGINATION_TRUNCATED"
+        assert "did not report a total" in str(exc.value)
+
+    def test_cursor_pagination_stops_on_null_next(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}], "next": "cursor-2"},
+                {"items": [{"i": 2}], "next": None},
+            ]
+        )
+
+        out = api.paginate("/dummy", max_pages=5)
+        assert out == [{"i": 1}, {"i": 2}]
+        assert api._request.call_args_list[1].kwargs["params"]["next"] == "cursor-2"
+
+    def test_repeated_cursor_raises(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            return_value={"items": [{"i": 1}], "next": "same"}
+        )
+
+        with pytest.raises(helpers.PaginationError) as exc:
+            api.paginate("/dummy", max_pages=5)
+        assert exc.value.error_code == "PAGINATION_LOOP"

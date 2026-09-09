@@ -9,8 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from netops_api_navigator.tools.api_call_validation import (
@@ -21,7 +19,6 @@ from netops_api_navigator.tools.api_call_validation import (
     normalise_path,
     validate_call,
 )
-
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -127,6 +124,26 @@ class TestRequiredQueryParams:
             }
         )
         result = validate_call(gm, "GET", "/things/abc", None, None)
+        assert result.ok
+
+    def test_caller_can_own_required_pagination_params(self):
+        gm = _FakeGraph(
+            {
+                "required_params": [
+                    {"name": "limit", "location": "query"},
+                    {"name": "next", "location": "query"},
+                    {"name": "scopeId", "location": "query"},
+                ]
+            }
+        )
+        result = validate_call(
+            gm,
+            "GET",
+            "/things",
+            {"scopeId": "abc"},
+            None,
+            ignored_required_query_params={"limit", "next", "offset"},
+        )
         assert result.ok
 
 

@@ -78,6 +78,8 @@ def validate_call(
     path: str,
     query_params: dict[str, str] | None,
     body: dict | None,
+    *,
+    ignored_required_query_params: set[str] | None = None,
 ) -> ValidationResult:
     """Pre-flight validation against the graph.
 
@@ -115,10 +117,13 @@ def validate_call(
         )
 
     supplied_query = set((query_params or {}).keys())
+    ignored_required_query_params = ignored_required_query_params or set()
     for row in param_rows or []:
         loc = (row.get("location") or "").lower()
         name = row.get("name") or ""
         if not name or loc != "query":
+            continue
+        if name in ignored_required_query_params:
             continue
         if name not in supplied_query:
             result.errors.append(f"Missing required query parameter: {name!r}.")

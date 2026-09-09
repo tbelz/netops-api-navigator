@@ -41,7 +41,10 @@ from .tools.status import register_status_tool
 
 logger = setup_logging()
 _KNOWLEDGE_SCHEMA_VERSION = 10
-_WORKSHOP_GRAPH_TOOLS_TO_REMOVE = {"write_graph", "query_topology", "query_runtime"}
+_WORKSHOP_GRAPH_TOOLS_TO_REMOVE = {"write_graph", "query_runtime"}
+_WORKSHOP_AUTO_RUN_SEEDS = frozenset(
+    {"populate_base_graph.py", "enrich_topology.py"}
+)
 
 
 class StartupError(RuntimeError):
@@ -267,7 +270,10 @@ def _prepare_script_library(settings: Settings, graph_manager: GraphManager) -> 
         sync_seeds_to_graph(graph_manager, seeds_dir, settings.script_library_path)
 
 
-def _get_auto_run_seeds(settings: Settings) -> list[str]:
+def _get_auto_run_seeds(
+    settings: Settings,
+    allowed_scripts: frozenset[str] | None = None,
+) -> list[str]:
     auto_seeds: dict[str, list[str]] = {}
     for meta_file in sorted(settings.script_library_path.glob("*.meta.json")):
         try:
@@ -276,6 +282,8 @@ def _get_auto_run_seeds(settings: Settings) -> list[str]:
             continue
         if meta.get("auto_run"):
             script_name = meta_file.name.replace(".meta.json", ".py")
+            if allowed_scripts is not None and script_name not in allowed_scripts:
+                continue
             if (settings.script_library_path / script_name).exists():
                 auto_seeds[script_name] = meta.get("depends_on", [])
 
@@ -303,10 +311,14 @@ def _update_script_node(
         logger.debug("script_node_update_failed", filename=script_name, error=str(exc))
 
 
-def _run_auto_seeds(runtime: ServerRuntime, ipc_env: dict[str, str]) -> None:
+def _run_auto_seeds(
+    runtime: ServerRuntime,
+    ipc_env: dict[str, str],
+    allowed_scripts: frozenset[str] | None = None,
+) -> None:
     import time
 
-    for script_name in _get_auto_run_seeds(runtime.settings):
+    for script_name in _get_auto_run_seeds(runtime.settings, allowed_scripts):
         started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         runtime.seed_status[script_name] = {"status": "running", "started_at": started}
         try:
@@ -316,13 +328,28 @@ def _run_auto_seeds(runtime: ServerRuntime, ipc_env: dict[str, str]) -> None:
             exit_code = result.get("exit_code", -1)
             finished = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             _update_script_node(runtime.graph_manager, script_name, finished, exit_code)
-            runtime.seed_status[script_name] = {
+            entry = {
                 "status": "success" if exit_code == 0 else "failed",
                 "exit_code": exit_code,
-                "error": (result.get("stderr") or result.get("stdout") or "")[:500],
                 "started_at": started,
                 "finished_at": finished,
             }
+            stdout = result.get("stdout") or ""
+            stderr = result.get("stderr") or ""
+            try:
+                summary = json.loads(stdout) if stdout else None
+            except json.JSONDecodeError:
+                summary = None
+            if isinstance(summary, dict):
+                entry["summary"] = summary
+                reported_errors = summary.get("errors") or summary.get("error")
+                if exit_code == 0 and reported_errors:
+                    entry["status"] = "partial"
+            if exit_code != 0:
+                entry["error"] = (stderr or stdout)[:500]
+            elif stderr:
+                entry["diagnostics"] = stderr[:500]
+            runtime.seed_status[script_name] = entry
         except Exception as exc:
             runtime.seed_status[script_name] = {
                 "status": "error",
@@ -403,6 +430,10 @@ def create_server(
                 workshop_mode=settings.workshop_mode,
             ),
         )
+        # FastMCP 1.x does not expose the low-level Server version argument.
+        # Set it explicitly so MCP initialization reports this package version
+        # instead of falling back to the MCP SDK version.
+        mcp._mcp_server.version = __version__
         runtime = ServerRuntime(
             settings=settings,
             mcp=mcp,
@@ -417,6 +448,12 @@ def create_server(
         if settings.workshop_mode:
             for tool_name in _WORKSHOP_GRAPH_TOOLS_TO_REMOVE:
                 mcp.remove_tool(tool_name)
+            ipc_env: dict[str, str] | None = None
+            if client is not None and start_background:
+                _prepare_script_library(settings, graph_manager)
+                runtime.ipc_server = GraphIPCServer(graph_manager)
+                runtime.ipc_server.start()
+                ipc_env = runtime.ipc_server.environment
             if client is not None:
                 register_workshop_api_call_tool(mcp, settings, client, graph_manager)
             register_status_tool(
@@ -424,9 +461,17 @@ def create_server(
                 settings,
                 graph_available=lambda: graph_manager.is_available,
                 connected=client is not None and validate_credentials,
+                seed_status=lambda: runtime.seed_status,
             )
             register_api_catalog_resource(mcp, settings, graph_manager)
             register_graph_resources(mcp, graph_manager, lambda: runtime.seed_status)
+            if ipc_env is not None:
+                threading.Thread(
+                    target=_run_auto_seeds,
+                    args=(runtime, ipc_env, _WORKSHOP_AUTO_RUN_SEEDS),
+                    name="netops-api-navigator-workshop-seeds",
+                    daemon=True,
+                ).start()
         else:
             _prepare_script_library(settings, graph_manager)
             ipc_env: dict[str, str] | None = None
@@ -462,6 +507,7 @@ def create_server(
                 settings,
                 graph_available=lambda: graph_manager.is_available,
                 connected=client is not None and validate_credentials,
+                seed_status=lambda: runtime.seed_status,
             )
             register_resources(mcp, settings, graph_manager)
             register_api_catalog_resource(mcp, settings, graph_manager)

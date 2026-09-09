@@ -155,12 +155,12 @@ server.py  main() → load_settings() → create_server()
     │
     ├── _load_api_tree()             → MATCH ApiEndpoint → render_path_tree() → embed in instructions
     │
-    ├── FastMCP("netops-api-navigator", instructions=…)
+    ├── FastMCP("netops-api-navigator", instructions=…) + package serverInfo version
     ├── GraphIPCServer.start()       → authenticated loopback TCP in full connected mode
     │
     ├── GreenLakeClient.validate()   → optional, degrades gracefully
     ├── Full profile: copy/sync script runtime and seeds
-    ├── Workshop profile: omit writes, scripts, GreenLake, compiler/hydration and seed jobs
+    ├── Workshop profile: omit user writes/scripts and run two trusted GET-only topology seeds
     │
     ├── Register tools, resources, prompts
     │
@@ -791,9 +791,10 @@ When `READ_ONLY=true`:
 - Local graph writes (`write_graph`) and script CRUD / execution remain available.
 
 `MCP_PROFILE=workshop` is stricter than general read-only mode. It permanently
-enables read-only operation and omits local graph writes, script CRUD/execution,
-GreenLake, compiler/hydration tools, prompts, and automatic seed jobs. Connected
-workshop sessions expose Central GET calls only.
+enables network read-only operation and omits direct graph writes, user script
+CRUD/execution, GreenLake, compiler/hydration tools, and prompts. Connected
+workshop sessions add a bounded GET-only paginator and automatically run only
+the bundled base-graph and L2-topology seeds against the private local graph.
 
 ---
 

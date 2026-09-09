@@ -162,6 +162,113 @@ class BaseHTTPClient:
     def get(self, path: str, params: dict | None = None) -> dict:
         return self._request("GET", path, params=params)
 
+    def paginate(
+        self,
+        path: str,
+        params: dict | None = None,
+        *,
+        max_pages: int = 50,
+        page_size: int = 100,
+        item_key: str | None = None,
+    ) -> list[dict]:
+        """Fetch every page from a list endpoint with bounded pagination.
+
+        Cursor pagination is selected when a response contains a non-null
+        ``next`` value. Other responses use an integer ``offset``. The method
+        raises instead of returning a silently truncated list when the page
+        limit is reached.
+        """
+        if not 1 <= max_pages <= 50:
+            raise ValueError("max_pages must be between 1 and 50")
+        if not 1 <= page_size <= 1000:
+            raise ValueError("page_size must be between 1 and 1000")
+
+        all_items: list[dict] = []
+        merged = dict(params or {})
+        merged["limit"] = str(page_size)
+        try:
+            initial_offset = int(merged.get("offset", 0))
+        except (TypeError, ValueError):
+            initial_offset = 0
+        page_params = dict(merged)
+        seen_cursors: set[str] = set()
+
+        for page_num in range(1, max_pages + 1):
+            try:
+                response = self._request("GET", path, params=page_params)
+            except CentralAPIError as exc:
+                position = "first page" if page_num == 1 else f"page {page_num}"
+                raise PaginationError(
+                    exc.status_code,
+                    exc.error_code,
+                    f"Pagination failed on {position}: {exc.message}",
+                    exc.debug_id,
+                ) from exc
+
+            if not isinstance(response, dict):
+                raise PaginationError(
+                    0,
+                    "INVALID_PAGINATION_RESPONSE",
+                    f"Expected dict response, got {type(response).__name__}",
+                )
+
+            key = item_key or detect_item_key(response)
+            if key is None:
+                raise PaginationError(
+                    0,
+                    "ITEM_ARRAY_NOT_FOUND",
+                    f"Cannot detect item array in response keys: {list(response.keys())}",
+                )
+            items = response.get(key)
+            if not isinstance(items, list):
+                raise PaginationError(
+                    0,
+                    "INVALID_ITEM_ARRAY",
+                    f"Response field {key!r} is not an array.",
+                )
+            all_items.extend(items)
+
+            raw_total = response.get("total", response.get("count", 0))
+            try:
+                total = int(raw_total or 0)
+            except (TypeError, ValueError):
+                total = 0
+            if total and len(all_items) >= total:
+                return all_items
+            if not items:
+                return all_items
+
+            if "next" in response:
+                cursor = response.get("next")
+                if cursor is None:
+                    return all_items
+                cursor_text = str(cursor)
+                if not cursor_text:
+                    return all_items
+                if cursor_text in seen_cursors:
+                    raise PaginationError(
+                        0,
+                        "PAGINATION_LOOP",
+                        f"Server repeated cursor {cursor_text!r} on page {page_num}.",
+                    )
+                seen_cursors.add(cursor_text)
+                page_params = dict(merged)
+                page_params["next"] = cursor_text
+            else:
+                page_params = dict(merged)
+                page_params["offset"] = str(initial_offset + len(all_items))
+
+        total_suffix = f"/{total}" if total else " (server did not report a total)"
+        raise PaginationError(
+            0,
+            "PAGINATION_TRUNCATED",
+            (
+                f"paginate() hit max_pages={max_pages} after collecting "
+                f"{len(all_items)}{total_suffix} items. Increase max_pages or "
+                "pre-filter the query server-side to keep the result bounded."
+            ),
+        )
+
     def post(self, path: str, json_body: dict | None = None, params: dict | None = None) -> dict:
         return self._request("POST", path, params=params, json_body=json_body)
 

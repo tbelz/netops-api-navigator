@@ -10,10 +10,11 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from netops_api_navigator._http_core import BaseHTTPClient, CentralAPIError
 from netops_api_navigator.config import Settings, load_settings
 from netops_api_navigator.tools.execution import _build_env
-
 
 # ── Settings parsing ────────────────────────────────────────────────
 
@@ -110,9 +110,11 @@ class TestApiCallToolsReadOnly:
     @pytest.fixture
     def setup(self, monkeypatch):
         from mcp.server.fastmcp import FastMCP
+
         from netops_api_navigator.central_client import CentralClient
         from netops_api_navigator.tools.api_call import (
-            register_api_call_tools, register_greenlake_api_call_tools,
+            register_api_call_tools,
+            register_greenlake_api_call_tools,
         )
         # Avoid real HTTP from BaseHTTPClient init
         settings = Settings(
@@ -150,6 +152,7 @@ class TestWorkshopApiTool:
     def test_schema_has_no_method_or_body_and_batch_rejects_writes(self):
         from mcp.server.fastmcp import FastMCP
         from mcp.server.fastmcp.exceptions import ToolError
+
         from netops_api_navigator.central_client import CentralClient
         from netops_api_navigator.tools.api_call import register_workshop_api_call_tool
 
@@ -162,11 +165,35 @@ class TestWorkshopApiTool:
         client = CentralClient("https://x", "cid", "csec")
         mcp = FastMCP("test-workshop")
         register_workshop_api_call_tool(mcp, settings, client, None)
-        tool = next(iter(mcp._tool_manager._tools.values()))
+        tools = mcp._tool_manager._tools
+        call_tool = tools["call_central_api"]
+        paginate_tool = tools["paginate_central_api"]
 
-        assert set(tool.parameters["properties"]) == {"path", "query_params", "calls"}
+        assert set(call_tool.parameters["properties"]) == {"path", "query_params", "calls"}
+        assert set(paginate_tool.parameters["properties"]) == {
+            "path",
+            "query_params",
+            "page_size",
+            "max_pages",
+            "item_key",
+        }
         with pytest.raises(ToolError, match="GET"):
-            tool.fn(calls=[{"path": "x", "method": "POST", "body": {"x": 1}}])
+            call_tool.fn(calls=[{"path": "x", "method": "POST", "body": {"x": 1}}])
+
+        client.paginate = MagicMock(return_value=[{"serial": "SERIAL-1"}])
+        result = json.loads(paginate_tool.fn(path="devices", page_size=25, max_pages=3))
+        assert result["item_count"] == 1
+        assert result["items"] == [{"serial": "SERIAL-1"}]
+        client.paginate.assert_called_once_with(
+            "devices",
+            params=None,
+            page_size=25,
+            max_pages=3,
+            item_key=None,
+        )
+
+        with pytest.raises(ToolError, match="managed by this tool"):
+            paginate_tool.fn(path="devices", query_params={"next": "2"})
 
 
 # ── _build_env propagation ──────────────────────────────────────────
@@ -373,3 +400,6 @@ class TestInstructionsBanner:
         assert "GET-ONLY" in text
         assert "write_graph" not in text
         assert "execute_script" not in text
+        assert "query_topology" in text
+        assert "paginate_central_api" in text
+        assert "bundled GET-only" in text

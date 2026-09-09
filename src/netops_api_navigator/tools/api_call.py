@@ -10,7 +10,13 @@ import structlog
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from ..central_client import BaseAPIClient, CentralAPIError, CentralClient, GreenLakeClient
+from ..central_client import (
+    BaseAPIClient,
+    CentralAPIError,
+    CentralClient,
+    GreenLakeClient,
+    PaginationError,
+)
 from ..config import Settings
 from .api_call_validation import (
     format_validation_error,
@@ -25,6 +31,8 @@ logger = structlog.get_logger("tools.api_call")
 
 _WRITE_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 _BATCH_CAP = 25
+_PAGINATION_PARAMS = {"limit", "offset", "next"}
+_PAGINATION_RESPONSE_BYTES = 1_000_000
 
 
 # ── 404 path suggestions from the API schema graph ──────────────────
@@ -290,6 +298,99 @@ def _make_api_call(
         raise ToolError(f"API call failed: {e}")
 
 
+def _make_paginated_api_call(
+    client: BaseAPIClient,
+    path: str,
+    query_params: dict[str, str] | None,
+    page_size: int,
+    max_pages: int,
+    item_key: str | None,
+    graph_manager: "GraphManager | None",
+) -> str:
+    """Validate and execute one bounded, GET-only paginated Central call."""
+    clean_path = _validate_path(path)
+    if clean_path is None:
+        raise ToolError("Path cannot be empty or contain '..'.")
+    if not 1 <= page_size <= 1000:
+        raise ToolError("page_size must be between 1 and 1000.")
+    if not 1 <= max_pages <= 50:
+        raise ToolError("max_pages must be between 1 and 50.")
+
+    supplied_pagination = {
+        str(name).lower() for name in (query_params or {})
+    } & _PAGINATION_PARAMS
+    if supplied_pagination:
+        names = ", ".join(sorted(supplied_pagination))
+        raise ToolError(
+            f"Pagination parameters are managed by this tool: {names}. "
+            "Remove them from query_params."
+        )
+
+    validation = validate_call(
+        graph_manager,
+        "GET",
+        path,
+        query_params,
+        None,
+        ignored_required_query_params=_PAGINATION_PARAMS,
+    )
+    if not validation.ok:
+        raise ToolError(format_validation_error(validation))
+
+    try:
+        logger.info(
+            "api_pagination_start",
+            platform="central",
+            path=clean_path,
+            page_size=page_size,
+            max_pages=max_pages,
+        )
+        items = client.paginate(
+            clean_path,
+            params=query_params,
+            page_size=page_size,
+            max_pages=max_pages,
+            item_key=(item_key or "").strip() or None,
+        )
+    except PaginationError as exc:
+        hint = _api_error_hint(exc, clean_path, "GET", graph_manager)
+        raise ToolError(
+            f"Pagination failed [{exc.status_code}]: {exc.message}{hint}"
+            + (f" (debugId: {exc.debug_id})" if exc.debug_id else "")
+        ) from exc
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("api_pagination_failed", path=clean_path, error=str(exc))
+        raise ToolError(f"Pagination failed: {exc}") from exc
+
+    envelope: dict[str, Any] = {
+        "request": {
+            "method": "GET",
+            "path": path,
+            "query_params": query_params or {},
+        },
+        "pagination": {
+            "page_size": page_size,
+            "max_pages": max_pages,
+            "item_key": (item_key or "").strip() or "auto",
+        },
+        "item_count": len(items),
+        "items": items,
+    }
+    if validation.warnings:
+        envelope["warnings"] = validation.warnings
+    payload = json.dumps(envelope, indent=2, default=str)
+    if len(payload.encode("utf-8")) > _PAGINATION_RESPONSE_BYTES:
+        raise ToolError(
+            "Paginated result exceeds the 1 MB MCP response cap. Add a "
+            "server-side filter or select a narrower collection. No partial "
+            "result was returned."
+        )
+    logger.info("api_pagination_done", platform="central", path=clean_path, items=len(items))
+    return payload
+
+
 # ── Batch helpers ───────────────────────────────────────────────────
 
 
@@ -540,6 +641,54 @@ def register_workshop_api_call_tool(
             None,
             warning_header=format_validation_warnings(result),
             graph_manager=graph_manager,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    def paginate_central_api(
+        path: str,
+        query_params: dict[str, str] | None = None,
+        page_size: int = 100,
+        max_pages: int = 50,
+        item_key: str | None = None,
+    ) -> str:
+        """Fetch a complete Central collection using safe GET-only pagination.
+
+        Use this workshop tool for device, site, inventory, alert, or other
+        list endpoints. It owns ``limit``, ``offset``, and ``next`` and
+        auto-detects cursor versus offset pagination. Other required query
+        parameters are still checked against the API graph. The call fails
+        rather than returning partial data when it reaches ``max_pages`` or
+        the 1 MB MCP response cap.
+
+        Args:
+            path: Central collection path without the base URL.
+            query_params: Filters and non-pagination query parameters.
+            page_size: Items requested per page, from 1 through 1000.
+            max_pages: Hard request cap, from 1 through 50.
+            item_key: Optional response field containing the item array.
+
+        Returns:
+            JSON containing request metadata, item_count, and the flat items.
+        """
+        if not settings.has_credentials:
+            raise ToolError(
+                "Central credentials not configured. Set CENTRAL_BASE_URL, "
+                "CENTRAL_CLIENT_ID, and CENTRAL_CLIENT_SECRET."
+            )
+        return _make_paginated_api_call(
+            client,
+            path,
+            query_params,
+            page_size,
+            max_pages,
+            item_key,
+            graph_manager,
         )
 
 

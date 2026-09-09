@@ -9,11 +9,12 @@ from __future__ import annotations
 import structlog
 
 from ._http_core import (  # noqa: F401 — re-exported for backward compat
+    AuthenticationError,
     BaseHTTPClient,
     CentralAPIError,
-    AuthenticationError,
-    RateLimitError,
     NotFoundError,
+    PaginationError,
+    RateLimitError,
     parse_error_body,
     parse_retry_wait,
 )

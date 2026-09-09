@@ -258,15 +258,22 @@ This server is running directly on the participant's computer. Central
 credentials stay in the local process and must never be copied into source
 files, generated dashboards, chat responses, or logs.
 
-Only API discovery and authenticated Central GET requests are available:
-  • query_fts, query_api_schema, query_yang, query_graph, get_raw_schema
+The safe workshop surface includes API discovery, live topology, and
+authenticated Central GET requests:
+  • query_fts, query_api_schema, query_yang, query_topology, query_graph,
+    get_raw_schema
   • call_central_api — GET only; no method or request-body argument exists
+  • paginate_central_api — complete bounded collections; use this instead of
+    manually managing limit, offset, or next
   • get_server_status
 
-Script saving/execution, graph writes, GreenLake calls, compiler operations,
-runtime hydration, and startup seeds are deliberately unavailable. Never claim
-that a write was performed. Discover an endpoint before using it, keep live
-requests bounded, and treat returned tenant data as confidential.
+When credentials are configured, the server runs only its two bundled GET-only
+topology seeds in the background. They update the local graph; they never change
+Central. Check get_server_status or graph://seed-status before relying on
+query_topology. User-authored script saving/execution, graph writes, GreenLake
+calls, compiler operations, and runtime hydration remain unavailable. Never
+claim that a Central write was performed. Discover an endpoint before using it
+and treat returned tenant data as confidential.
 """
 
 
