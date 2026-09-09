@@ -178,10 +178,10 @@ class BaseHTTPClient:
         raises instead of returning a silently truncated list when the page
         limit is reached.
         """
-        if not 1 <= max_pages <= 50:
-            raise ValueError("max_pages must be between 1 and 50")
-        if not 1 <= page_size <= 1000:
-            raise ValueError("page_size must be between 1 and 1000")
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        if page_size < 1:
+            raise ValueError("page_size must be at least 1")
 
         all_items: list[dict] = []
         merged = dict(params or {})
@@ -192,6 +192,7 @@ class BaseHTTPClient:
             initial_offset = 0
         page_params = dict(merged)
         seen_cursors: set[str] = set()
+        resolved_item_key = item_key
 
         for page_num in range(1, max_pages + 1):
             try:
@@ -212,19 +213,20 @@ class BaseHTTPClient:
                     f"Expected dict response, got {type(response).__name__}",
                 )
 
-            key = item_key or detect_item_key(response)
-            if key is None:
+            if resolved_item_key is None:
+                resolved_item_key = detect_item_key(response)
+            if resolved_item_key is None:
                 raise PaginationError(
                     0,
                     "ITEM_ARRAY_NOT_FOUND",
                     f"Cannot detect item array in response keys: {list(response.keys())}",
                 )
-            items = response.get(key)
+            items = response.get(resolved_item_key)
             if not isinstance(items, list):
                 raise PaginationError(
                     0,
                     "INVALID_ITEM_ARRAY",
-                    f"Response field {key!r} is not an array.",
+                    f"Response field {resolved_item_key!r} is not an array.",
                 )
             all_items.extend(items)
 

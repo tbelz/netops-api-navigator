@@ -124,3 +124,22 @@ class TestPaginateHardFail:
         with pytest.raises(helpers.PaginationError) as exc:
             api.paginate("/dummy", max_pages=5)
         assert exc.value.error_code == "PAGINATION_LOOP"
+
+    def test_script_helper_allows_explicit_page_cap_above_workshop_limit(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(return_value={"items": [{"i": 1}], "total": 1})
+
+        assert api.paginate("/dummy", max_pages=51) == [{"i": 1}]
+
+    def test_auto_detected_item_key_is_reused_on_later_pages(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"aps": [{"i": 1}], "total": 2},
+                {"warnings": [], "aps": [{"i": 2}], "total": 2},
+            ]
+        )
+
+        assert api.paginate("/dummy") == [{"i": 1}, {"i": 2}]
