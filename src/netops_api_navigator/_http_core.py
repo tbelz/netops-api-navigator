@@ -250,11 +250,23 @@ class BaseHTTPClient:
                 return all_items
 
             if pagination_style is None:
-                pagination_style = (
-                    self._PAGINATION_STYLE
-                    if self._PAGINATION_STYLE != "auto"
-                    else "cursor" if response.get("next") is not None else "offset"
-                )
+                if self._PAGINATION_STYLE != "auto":
+                    pagination_style = self._PAGINATION_STYLE
+                elif response.get("next") is not None:
+                    pagination_style = "cursor"
+                elif (total and len(all_items) < total) or "offset" in response:
+                    pagination_style = "offset"
+                elif "next" in response:
+                    pagination_style = "cursor"
+                else:
+                    pagination_style = "offset"
+
+            if (
+                pagination_style == "offset"
+                and not total
+                and len(items) < page_size
+            ):
+                return all_items
 
             if pagination_style == "cursor":
                 cursor = response.get("next")

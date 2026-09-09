@@ -195,6 +195,44 @@ class TestWorkshopApiTool:
         with pytest.raises(ToolError, match="managed by this tool"):
             paginate_tool.fn(path="devices", query_params={"next": "2"})
 
+    def test_paginator_seeds_required_initial_offset(self):
+        from mcp.server.fastmcp import FastMCP
+
+        from netops_api_navigator.central_client import CentralClient
+        from netops_api_navigator.tools.api_call import register_workshop_api_call_tool
+
+        class _RequiredOffsetGraph:
+            is_available = True
+
+            def query(self, cypher, params=None, read_only=True):
+                if "WHERE p.required = true" in cypher:
+                    return [{"name": "offset", "location": "query"}]
+                return []
+
+        settings = Settings(
+            profile="workshop",
+            central_base_url="https://x",
+            central_client_id="cid",
+            central_client_secret="csec",
+        )
+        client = CentralClient("https://x", "cid", "csec")
+        client.paginate = MagicMock(return_value=[])
+        mcp = FastMCP("test-workshop")
+        register_workshop_api_call_tool(mcp, settings, client, _RequiredOffsetGraph())
+
+        result = json.loads(
+            mcp._tool_manager._tools["paginate_central_api"].fn(path="devices")
+        )
+
+        assert result["request"]["query_params"] == {"offset": "0"}
+        client.paginate.assert_called_once_with(
+            "devices",
+            params={"offset": "0"},
+            page_size=100,
+            max_pages=50,
+            item_key=None,
+        )
+
 
 # ── _build_env propagation ──────────────────────────────────────────
 

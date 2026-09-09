@@ -112,6 +112,7 @@ class TestRequiredQueryParams:
             gm, "GET", "/cfg/things", {"scopeId": "abc"}, None
         )
         assert result.ok
+        assert result.required_query_params == {"scopeid"}
 
     def test_required_path_param_ignored(self):
         # Required path params are validated by the server returning 404,
@@ -145,6 +146,7 @@ class TestRequiredQueryParams:
             ignored_required_query_params={"limit", "next", "offset"},
         )
         assert result.ok
+        assert result.required_query_params == {"limit", "next", "scopeid"}
 
 
 # ── request body validation ──────────────────────────────────────────

@@ -337,6 +337,11 @@ def _make_paginated_api_call(
     if not validation.ok:
         raise ToolError(format_validation_error(validation))
 
+    effective_query_params = query_params
+    if "offset" in validation.required_query_params:
+        effective_query_params = dict(query_params or {})
+        effective_query_params["offset"] = "0"
+
     try:
         logger.info(
             "api_pagination_start",
@@ -347,7 +352,7 @@ def _make_paginated_api_call(
         )
         items = client.paginate(
             clean_path,
-            params=query_params,
+            params=effective_query_params,
             page_size=page_size,
             max_pages=max_pages,
             item_key=(item_key or "").strip() or None,
@@ -368,7 +373,7 @@ def _make_paginated_api_call(
         "request": {
             "method": "GET",
             "path": path,
-            "query_params": query_params or {},
+            "query_params": effective_query_params or {},
         },
         "pagination": {
             "page_size": page_size,

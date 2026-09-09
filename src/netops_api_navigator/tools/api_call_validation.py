@@ -44,6 +44,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     schema_summary: dict[str, Any] = field(default_factory=dict)
+    required_query_params: set[str] = field(default_factory=set)
 
     @property
     def ok(self) -> bool:
@@ -116,16 +117,20 @@ def validate_call(
             "checked against the schema."
         )
 
-    supplied_query = set((query_params or {}).keys())
-    ignored_required_query_params = ignored_required_query_params or set()
+    supplied_query = {str(name).lower() for name in (query_params or {})}
+    ignored_required_query_params = {
+        str(name).lower() for name in (ignored_required_query_params or set())
+    }
     for row in param_rows or []:
         loc = (row.get("location") or "").lower()
         name = row.get("name") or ""
         if not name or loc != "query":
             continue
-        if name in ignored_required_query_params:
+        normalized_name = name.lower()
+        result.required_query_params.add(normalized_name)
+        if normalized_name in ignored_required_query_params:
             continue
-        if name not in supplied_query:
+        if normalized_name not in supplied_query:
             result.errors.append(f"Missing required query parameter: {name!r}.")
 
     method_u = method.upper()

@@ -96,7 +96,7 @@ class TestPaginateHardFail:
         api._request = MagicMock(return_value={"aps": [{"i": 1}]})
 
         with pytest.raises(helpers.PaginationError) as exc:
-            api.paginate("/dummy", max_pages=2)
+            api.paginate("/dummy", page_size=1, max_pages=2)
         assert exc.value.error_code == "PAGINATION_TRUNCATED"
         assert "did not report a total" in str(exc.value)
 
@@ -130,6 +130,17 @@ class TestPaginateHardFail:
         assert second_page["offset"] == "2"
         assert "next" not in second_page
 
+    def test_single_page_cursor_stops_on_null_next_without_total(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            return_value={"items": [{"i": 1}, {"i": 2}], "next": None}
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}]
+        api._request.assert_called_once()
+
     def test_page_local_count_does_not_truncate_cursor_pagination(self, helpers):
         api = helpers.CentralAPI()
         api._ensure_token = MagicMock()
@@ -151,6 +162,19 @@ class TestPaginateHardFail:
             side_effect=[
                 {"items": [{"i": 1}, {"i": 2}], "total": 3},
                 {"items": [{"i": 3}]},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+
+    def test_short_offset_page_without_total_is_complete(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "count": 2, "offset": 0},
+                {"items": [{"i": 3}], "count": 1, "offset": 2},
             ]
         )
 
