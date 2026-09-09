@@ -78,6 +78,8 @@ class GreenLakeAPI(BaseHTTPClient):
         devices = glp.get("devices/v1/devices", params={"limit": "100"})
     """
 
+    _PAGINATION_STYLE = "offset"
+
     def __init__(self) -> None:
         self._glp_client_id = os.environ.get(
             "GREENLAKE_CLIENT_ID", os.environ.get("GLP_CLIENT_ID", "")

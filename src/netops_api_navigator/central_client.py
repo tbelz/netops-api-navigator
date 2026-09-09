@@ -32,6 +32,8 @@ class CentralClient(BaseHTTPClient):
 class GreenLakeClient(BaseHTTPClient):
     """HTTP client for HPE GreenLake Platform API."""
 
+    _PAGINATION_STYLE = "offset"
+
     def __init__(self, base_url: str, client_id: str, client_secret: str) -> None:
         super().__init__(base_url, client_id, client_secret, logger=logger)
 

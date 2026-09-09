@@ -144,6 +144,39 @@ class TestPaginateHardFail:
         assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
         assert api._request.call_args_list[1].kwargs["params"]["next"] == "cursor-2"
 
+    def test_preserves_first_page_total_when_later_page_omits_it(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "total": 3},
+                {"items": [{"i": 3}]},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+
+    def test_greenlake_pagination_remains_offset_based(self, helpers):
+        api = helpers.GreenLakeAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {
+                    "items": [{"i": 1}, {"i": 2}],
+                    "total": 3,
+                    "next": "not-a-greenlake-cursor",
+                },
+                {"items": [{"i": 3}], "total": 3},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+        second_page = api._request.call_args_list[1].kwargs["params"]
+        assert second_page["offset"] == "2"
+        assert "next" not in second_page
+
     def test_repeated_cursor_raises(self, helpers):
         api = helpers.CentralAPI()
         api._ensure_token = MagicMock()

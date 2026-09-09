@@ -115,6 +115,7 @@ class BaseHTTPClient:
     """
 
     _MAX_RATE_LIMIT_WAIT = 60  # seconds
+    _PAGINATION_STYLE = "auto"
 
     def __init__(self, base_url: str, client_id: str, client_secret: str,
                  *, logger=None) -> None:
@@ -194,6 +195,7 @@ class BaseHTTPClient:
         seen_cursors: set[str] = set()
         resolved_item_key = item_key
         pagination_style: str | None = None
+        total = 0
 
         for page_num in range(1, max_pages + 1):
             try:
@@ -234,11 +236,14 @@ class BaseHTTPClient:
             # Central commonly uses ``count`` for the number of items in the
             # current page. Only ``total`` is safe as a collection-completion
             # signal; cursor/empty-page handling covers responses without it.
-            raw_total = response.get("total", 0)
-            try:
-                total = int(raw_total or 0)
-            except (TypeError, ValueError):
-                total = 0
+            raw_total = response.get("total")
+            if raw_total is not None:
+                try:
+                    reported_total = int(raw_total or 0)
+                except (TypeError, ValueError):
+                    reported_total = 0
+                if reported_total > 0:
+                    total = reported_total
             if total and len(all_items) >= total:
                 return all_items
             if not items:
@@ -246,7 +251,9 @@ class BaseHTTPClient:
 
             if pagination_style is None:
                 pagination_style = (
-                    "cursor" if response.get("next") is not None else "offset"
+                    self._PAGINATION_STYLE
+                    if self._PAGINATION_STYLE != "auto"
+                    else "cursor" if response.get("next") is not None else "offset"
                 )
 
             if pagination_style == "cursor":
