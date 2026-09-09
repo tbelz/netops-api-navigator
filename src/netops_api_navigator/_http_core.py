@@ -193,6 +193,7 @@ class BaseHTTPClient:
         page_params = dict(merged)
         seen_cursors: set[str] = set()
         resolved_item_key = item_key
+        pagination_style: str | None = None
 
         for page_num in range(1, max_pages + 1):
             try:
@@ -240,7 +241,12 @@ class BaseHTTPClient:
             if not items:
                 return all_items
 
-            if "next" in response:
+            if pagination_style is None:
+                pagination_style = (
+                    "cursor" if response.get("next") is not None else "offset"
+                )
+
+            if pagination_style == "cursor":
                 cursor = response.get("next")
                 if cursor is None:
                     return all_items
