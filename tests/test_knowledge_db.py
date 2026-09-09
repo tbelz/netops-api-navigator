@@ -1,4 +1,4 @@
-"""Unit tests for ``hpe_networking_central_mcp.knowledge_db.download_knowledge_db``.
+"""Unit tests for ``netops_api_navigator.knowledge_db.download_knowledge_db``.
 
 Covers the extracted helper formerly inlined into ``server.py``. Uses
 ``httpx.MockTransport`` (no new dep) to drive the GitHub release API and the
@@ -7,16 +7,16 @@ asset download. No real network is touched.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tarfile
-from pathlib import Path
 
 import httpx
 import pytest
 
-from hpe_networking_central_mcp import knowledge_db as kdb_mod
-from hpe_networking_central_mcp.knowledge_db import download_knowledge_db
+from netops_api_navigator import knowledge_db as kdb_mod
+from netops_api_navigator.knowledge_db import download_knowledge_db
 
 pytestmark = pytest.mark.unit
 
@@ -87,6 +87,18 @@ def test_returns_false_when_repo_empty(tmp_path):
     assert download_knowledge_db("", tmp_path / "kdb") is False
 
 
+def test_invalid_explicit_digest_fails_before_network(tmp_path, monkeypatch):
+    def unexpected_get(*args, **kwargs):
+        raise AssertionError("invalid digest must fail before a network request")
+
+    monkeypatch.setattr(kdb_mod.httpx, "get", unexpected_get)
+    assert download_knowledge_db(
+        "owner/repo",
+        tmp_path / "kdb",
+        expected_sha256="not-a-sha256",
+    ) is False
+
+
 def test_returns_false_when_release_api_fails(tmp_path, monkeypatch):
     def handler(request):
         return httpx.Response(500, text="boom")
@@ -101,6 +113,35 @@ def test_returns_false_when_no_matching_asset(tmp_path, monkeypatch):
 
     _install_transport(monkeypatch, handler)
     assert download_knowledge_db("owner/repo", tmp_path / "kdb") is False
+
+
+def test_unpinned_download_skips_newer_package_release(tmp_path, monkeypatch):
+    tarball = _make_tarball()
+    asset_url = "https://example.invalid/knowledge_db.tar.gz"
+
+    def handler(request):
+        url = str(request.url)
+        if "api.github.com" in url:
+            assert "/releases?per_page=100" in url
+            return httpx.Response(
+                200,
+                json=[
+                    _release_payload(
+                        "https://example.invalid/package.whl",
+                        tag="v0.3.0",
+                        assets=[{"name": "package.whl"}],
+                    ),
+                    _release_payload(asset_url, tag="knowledge-db-selected"),
+                ],
+            )
+        assert url == asset_url
+        return httpx.Response(200, content=tarball)
+
+    _install_transport(monkeypatch, handler)
+    db_path = tmp_path / "kdb"
+    assert download_knowledge_db("owner/repo", db_path) is True
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["release_tag"] == "knowledge-db-selected"
 
 
 def test_happy_path_extracts_db_and_manifest(tmp_path, monkeypatch):
@@ -496,3 +537,106 @@ def test_install_writes_release_tag_into_manifest(tmp_path, monkeypatch):
     assert manifest["release_tag"] == "knowledge-db-stamped"
     # Original schema_version field from the tarball manifest preserved.
     assert manifest["schema_version"] == 3
+
+
+def test_pinned_cached_release_skips_network_entirely(tmp_path, monkeypatch):
+    db_path = tmp_path / "kdb"
+    db_path.mkdir()
+    (db_path / "db.lbd").write_bytes(b"cached")
+    digest = "a" * 64
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "release_tag": "knowledge-db-pinned",
+                "knowledge_asset": "knowledge_db.tar.gz",
+                "knowledge_archive_member": "knowledge_db",
+                "knowledge_projection": "legacy",
+                "knowledge_asset_sha256": digest,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def handler(request):
+        raise AssertionError(f"network must not be used for cached pin: {request.url}")
+
+    _install_transport(monkeypatch, handler)
+    assert download_knowledge_db(
+        "owner/repo",
+        db_path,
+        release_tag="knowledge-db-pinned",
+        expected_sha256=digest,
+        require_digest=True,
+    ) is False
+    assert (db_path / "db.lbd").read_bytes() == b"cached"
+
+
+def test_pinned_release_uses_tag_endpoint_and_verifies_digest(tmp_path, monkeypatch):
+    tarball = _make_tarball()
+    digest = hashlib.sha256(tarball).hexdigest()
+    asset_url = "https://example.invalid/knowledge_db.tar.gz"
+
+    def handler(request):
+        url = str(request.url)
+        if "api.github.com" in url:
+            assert "/releases/tags/knowledge-db-pinned" in url
+            return httpx.Response(
+                200,
+                json=_release_payload(
+                    asset_url,
+                    tag="knowledge-db-pinned",
+                    assets=[
+                        {
+                            "name": "knowledge_db.tar.gz",
+                            "browser_download_url": asset_url,
+                            "digest": f"sha256:{digest}",
+                        }
+                    ],
+                ),
+            )
+        return httpx.Response(200, content=tarball)
+
+    _install_transport(monkeypatch, handler)
+    db_path = tmp_path / "kdb"
+    assert download_knowledge_db(
+        "owner/repo",
+        db_path,
+        release_tag="knowledge-db-pinned",
+        require_digest=True,
+    ) is True
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["knowledge_asset_sha256"] == digest
+
+
+def test_digest_mismatch_preserves_existing_database(tmp_path, monkeypatch):
+    db_path = tmp_path / "kdb"
+    db_path.mkdir()
+    (db_path / "db.lbd").write_bytes(b"existing")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"release_tag": "knowledge-db-old"}), encoding="utf-8"
+    )
+    asset_url = "https://example.invalid/knowledge_db.tar.gz"
+
+    def handler(request):
+        if "api.github.com" in str(request.url):
+            return httpx.Response(
+                200,
+                json=_release_payload(
+                    asset_url,
+                    tag="knowledge-db-new",
+                    assets=[
+                        {
+                            "name": "knowledge_db.tar.gz",
+                            "browser_download_url": asset_url,
+                            "digest": f"sha256:{'0' * 64}",
+                        }
+                    ],
+                ),
+            )
+        return httpx.Response(200, content=_make_tarball())
+
+    _install_transport(monkeypatch, handler)
+    assert download_knowledge_db(
+        "owner/repo", db_path, require_digest=True
+    ) is False
+    assert (db_path / "db.lbd").read_bytes() == b"existing"

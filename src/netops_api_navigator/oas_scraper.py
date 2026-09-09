@@ -508,7 +508,7 @@ class ReadMeSpecProvider:
     """SpecProvider that pulls OpenAPI specs from ReadMe.io-hosted docs.
 
     Wraps :func:`discover_and_sync` to conform to the
-    :class:`~hpe_networking_central_mcp.spec_provider.SpecProvider` protocol.
+    :class:`~netops_api_navigator.spec_provider.SpecProvider` protocol.
 
     After :meth:`fetch_specs` runs, ``last_reports`` holds the per-source
     counters from the most recent invocation.

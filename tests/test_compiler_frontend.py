@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-import hpe_networking_central_mcp.compiler.frontend as frontend
-from hpe_networking_central_mcp.compiler.frontend import (
+import netops_api_navigator.compiler.frontend as frontend
+from netops_api_navigator.compiler.frontend import (
     ResolutionFailure,
     ResolutionResult,
     ResolvedSpec,

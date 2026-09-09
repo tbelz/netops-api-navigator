@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from hpe_networking_central_mcp.compiler.traversal_report import (  # noqa: E402
+from netops_api_navigator.compiler.traversal_report import (  # noqa: E402
     load_compiler_traversal_report,
 )
 

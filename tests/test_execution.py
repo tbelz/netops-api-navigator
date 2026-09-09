@@ -15,8 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.tools.execution import (
+from netops_api_navigator.config import Settings
+from netops_api_navigator.tools.execution import (
     _build_env,
     _run_script,
     EXECUTION_TIMEOUT,
@@ -70,9 +70,17 @@ class TestBuildEnv:
         assert env["GREENLAKE_CLIENT_SECRET"] == "glp-csec"
 
     def test_graph_paths_in_env(self, settings):
-        env = _build_env(settings)
+        ipc_env = {
+            "GRAPH_IPC_HOST": "127.0.0.1",
+            "GRAPH_IPC_PORT": "54321",
+            "GRAPH_IPC_TOKEN": "test-token",
+        }
+        env = _build_env(settings, ipc_env=ipc_env)
         assert "graph.db" in env["GRAPH_DB_PATH"]
-        assert "graph.sock" in env["GRAPH_IPC_SOCKET"]
+        assert env["GRAPH_IPC_HOST"] == "127.0.0.1"
+        assert env["GRAPH_IPC_PORT"] == "54321"
+        assert env["GRAPH_IPC_TOKEN"] == "test-token"
+        assert "GRAPH_IPC_SOCKET" not in env
 
     def test_stale_vars_removed(self, settings):
         """Generic vars like BASE_URL should be cleaned from env."""
@@ -96,7 +104,7 @@ class TestRunScript:
         mock_result.stdout = "hello world\n"
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result):
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result):
             result = json.loads(_run_script(settings, "hello.py"))
 
         assert result["exit_code"] == 0
@@ -125,10 +133,11 @@ class TestRunScript:
         mock_result.stdout = ""
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
             _run_script(settings, "hello.py", {"site": "NYC", "device": "SW01"})
 
         cmd = mock_run.call_args[0][0]
+        assert cmd[0] == sys.executable
         assert "--site" in cmd
         assert "NYC" in cmd
         assert "--device" in cmd
@@ -138,7 +147,7 @@ class TestRunScript:
         import subprocess
 
         with patch(
-            "hpe_networking_central_mcp.tools.execution.subprocess.run",
+            "netops_api_navigator.tools.execution.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="python3 hello.py", timeout=300),
         ):
             result = json.loads(_run_script(settings, "hello.py"))
@@ -152,7 +161,7 @@ class TestRunScript:
         mock_result.stdout = "x" * 20000
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result):
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result):
             result = json.loads(_run_script(settings, "hello.py"))
 
         assert result["truncated"] is True
@@ -164,7 +173,7 @@ class TestRunScript:
         mock_result.stdout = ""
         mock_result.stderr = ""
 
-        with patch("hpe_networking_central_mcp.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("netops_api_navigator.tools.execution.subprocess.run", return_value=mock_result) as mock_run:
             _run_script(settings, "hello.py")
 
         call_kwargs = mock_run.call_args[1]
@@ -180,7 +189,7 @@ class TestExecuteScriptTool:
 
     def test_tool_registered(self, settings):
         from mcp.server.fastmcp import FastMCP
-        from hpe_networking_central_mcp.tools.execution import register_execution_tools
+        from netops_api_navigator.tools.execution import register_execution_tools
 
         mcp = FastMCP("test")
         register_execution_tools(mcp, settings)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hpe_networking_central_mcp.api_tree import render_path_tree
+from netops_api_navigator.api_tree import render_path_tree
 
 
 def _ep(method: str, path: str, category: str = "Test", deprecated: bool = False) -> dict:

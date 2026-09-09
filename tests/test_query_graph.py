@@ -16,9 +16,9 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.graph.manager import GraphManager
-from hpe_networking_central_mcp.tools.graph import register_graph_tools
+from netops_api_navigator.config import Settings
+from netops_api_navigator.graph.manager import GraphManager
+from netops_api_navigator.tools.graph import register_graph_tools
 
 
 @pytest.fixture

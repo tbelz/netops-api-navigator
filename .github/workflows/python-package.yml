@@ -1,0 +1,340 @@
+name: Python Package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_NAME: netops-api-navigator
+  UV_VERSION: "0.11.24"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "${{ env.UV_VERSION }}"
+          enable-cache: true
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Export locked runtime constraints
+        run: >-
+          uv export --frozen --no-dev --no-emit-project
+          --format requirements-txt --output-file dist/constraints.txt
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "v${VERSION}" = "${GITHUB_REF_NAME}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-base-distribution
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/constraints.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  wheelhouse:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            runner: windows-latest
+          - id: macos-arm64
+            runner: macos-14
+          - id: linux-x64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "${{ env.UV_VERSION }}"
+          enable-cache: true
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-base-distribution
+          path: dist
+      - name: Download native dependency wheels
+        shell: bash
+        run: |
+          mkdir -p wheelhouse
+          uv run --no-project --python 3.12 --with pip python -m pip download --only-binary=:all: --dest wheelhouse --requirement dist/constraints.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: workshop-wheelhouse-${{ matrix.id }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs: [build, wheelhouse]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "${{ env.UV_VERSION }}"
+          enable-cache: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-base-distribution
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: workshop-wheelhouse-*
+          path: dist/wheelhouse
+          merge-multiple: true
+      - name: Build self-contained workshop bundle
+        shell: bash
+        run: |
+          WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$WHEEL"
+          uv run --frozen python scripts/build_workshop_bundle.py --constraints dist/constraints.txt --wheel "$WHEEL" --wheelhouse dist/wheelhouse
+          rm -rf dist/wheelhouse
+      - name: Generate release checksums
+        working-directory: dist
+        shell: bash
+        run: |
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.tmp
+          mv SHA256SUMS.tmp SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-distribution
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  native-smoke:
+    needs: assemble
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-14, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "${{ env.UV_VERSION }}"
+          enable-cache: true
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Extract workshop bundle
+        shell: bash
+        run: |
+          BUNDLE=$(find dist -maxdepth 1 -name '*-workshop-v*.zip' -print -quit)
+          test -n "$BUNDLE"
+          uv run --no-project --python 3.12 python -m zipfile -e "$BUNDLE" workshop-extracted
+      - name: Diagnose exact bundled wheel without an index or source builds
+        shell: bash
+        env:
+          MCP_PROFILE: workshop
+          KNOWLEDGE_RELEASE_REPO: ""
+          GRAPH_DB_PATH: ${{ runner.temp }}/netops-api-navigator/doctor-graph
+          SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/netops-api-navigator/scripts
+          SPEC_CACHE_DIR: ${{ runner.temp }}/netops-api-navigator/cache
+        run: |
+          ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)
+          WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$WHEEL"
+          uv tool run --isolated --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator doctor --profile workshop --skip-credentials
+      - name: Verify MCP stdio handshake and workshop tool surface
+        shell: bash
+        env:
+          MCP_PROFILE: workshop
+          KNOWLEDGE_RELEASE_REPO: ""
+          GRAPH_DB_PATH: ${{ runner.temp }}/netops-api-navigator/smoke-graph
+          SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/netops-api-navigator/scripts
+          SPEC_CACHE_DIR: ${{ runner.temp }}/netops-api-navigator/cache
+        run: |
+          ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)
+          WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
+          uv run --no-project --python 3.12 scripts/smoke_mcp_stdio.py -- uv tool run --isolated --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator --profile workshop
+
+  publish-testpypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: native-smoke
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/netops-api-navigator
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Prepare publishable distributions
+        run: |
+          mkdir publish
+          cp dist/*.whl publish/
+          cp dist/netops_api_navigator-*.tar.gz publish/
+      - name: Publish to TestPyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  verify-testpypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    outputs:
+      wheel-url: ${{ steps.verify.outputs.wheel_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "${{ env.UV_VERSION }}"
+          enable-cache: true
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Prepare local comparison set
+        run: |
+          mkdir publish
+          cp dist/*.whl publish/
+          cp dist/netops_api_navigator-*.tar.gz publish/
+      - name: Verify TestPyPI files and digests
+        id: verify
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python scripts/verify_pypi_release.py --index-url https://test.pypi.org --project "${PROJECT_NAME}" --version "$VERSION" --distributions publish --github-output "${GITHUB_OUTPUT}"
+      - name: Run the exact TestPyPI wheel
+        shell: bash
+        env:
+          MCP_PROFILE: workshop
+          KNOWLEDGE_RELEASE_REPO: ""
+          GRAPH_DB_PATH: ${{ runner.temp }}/netops-api-navigator/testpypi-graph
+          SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/netops-api-navigator/scripts
+          SPEC_CACHE_DIR: ${{ runner.temp }}/netops-api-navigator/cache
+        run: >-
+          uv tool run --isolated --python 3.12 --no-build
+          --constraints dist/constraints.txt
+          --from "${{ steps.verify.outputs.wheel_url }}"
+          netops-api-navigator doctor --profile workshop --skip-credentials
+
+  publish-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify-testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/netops-api-navigator
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Prepare publishable distributions
+        run: |
+          mkdir publish
+          cp dist/*.whl publish/
+          cp dist/netops_api_navigator-*.tar.gz publish/
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: publish
+          skip-existing: true
+
+  verify-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Prepare local comparison set
+        run: |
+          mkdir publish
+          cp dist/*.whl publish/
+          cp dist/netops_api_navigator-*.tar.gz publish/
+      - name: Verify PyPI files and digests
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python scripts/verify_pypi_release.py --index-url https://pypi.org --project "${PROJECT_NAME}" --version "$VERSION" --distributions publish
+
+  pypi-install-smoke:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify-pypi
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-14, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "${{ env.UV_VERSION }}"
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install and diagnose from PyPI
+        shell: bash
+        env:
+          MCP_PROFILE: workshop
+          KNOWLEDGE_RELEASE_REPO: ""
+          GRAPH_DB_PATH: ${{ runner.temp }}/netops-api-navigator/pypi-graph
+          SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/netops-api-navigator/scripts
+          SPEC_CACHE_DIR: ${{ runner.temp }}/netops-api-navigator/cache
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for ATTEMPT in {1..12}; do
+            if uv tool run --isolated --python 3.12 --no-build --from "${PROJECT_NAME}==${VERSION}" netops-api-navigator doctor --profile workshop --skip-credentials; then
+              exit 0
+            fi
+            if [ "$ATTEMPT" -lt 12 ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pypi-install-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distribution
+          path: dist
+      - name: Create or repair GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --latest --title "NetOps API Navigator ${GITHUB_REF_NAME}"
+          fi

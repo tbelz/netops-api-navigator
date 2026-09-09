@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from hpe_networking_central_mcp.vsg_scraper import (
+from netops_api_navigator.vsg_scraper import (
     DocEntry,
     VsgDocProvider,
     _html_to_text,
@@ -213,7 +213,7 @@ class TestExtractSections:
 # ── Scraping with mocked HTTP ───────────────────────────────────────
 
 class TestScrapeVsgDocs:
-    @patch("hpe_networking_central_mcp.vsg_scraper._fetch_page")
+    @patch("netops_api_navigator.vsg_scraper._fetch_page")
     def test_scrape_returns_sections(self, mock_fetch):
         mock_fetch.return_value = SAMPLE_PAGE_HTML
         entries = scrape_vsg_docs(
@@ -224,7 +224,7 @@ class TestScrapeVsgDocs:
         assert len(entries) >= 3
         assert all(isinstance(e, DocEntry) for e in entries)
 
-    @patch("hpe_networking_central_mcp.vsg_scraper._fetch_page")
+    @patch("netops_api_navigator.vsg_scraper._fetch_page")
     def test_scrape_handles_fetch_error(self, mock_fetch):
         mock_fetch.side_effect = Exception("Network error")
         entries = scrape_vsg_docs(
@@ -236,17 +236,17 @@ class TestScrapeVsgDocs:
 
 
 class TestVsgDocProvider:
-    @patch("hpe_networking_central_mcp.vsg_scraper._fetch_page")
+    @patch("netops_api_navigator.vsg_scraper._fetch_page")
     def test_provider_name(self, mock_fetch):
         provider = VsgDocProvider()
         assert provider.name == "VSG Central"
 
-    @patch("hpe_networking_central_mcp.vsg_scraper._fetch_page")
+    @patch("netops_api_navigator.vsg_scraper._fetch_page")
     def test_provider_fetch_docs(self, mock_fetch):
         mock_fetch.return_value = SAMPLE_PAGE_HTML
         provider = VsgDocProvider()
         # Use a single page for faster test
-        with patch("hpe_networking_central_mcp.vsg_scraper.VSG_CENTRAL_PAGES", [("test", "/test/")]):
+        with patch("netops_api_navigator.vsg_scraper.VSG_CENTRAL_PAGES", [("test", "/test/")]):
             entries = provider.fetch_docs(cache_dir=Path("/tmp/test_vsg_provider"), ttl=0)
         assert len(entries) >= 1
 
@@ -263,7 +263,7 @@ class TestPopulateDocs:
         except ImportError:
             pytest.skip("real_ladybug not available")
 
-        from hpe_networking_central_mcp.graph.schema import (
+        from netops_api_navigator.graph.schema import (
             KNOWLEDGE_NODE_TABLES,
             NODE_TABLES,
         )

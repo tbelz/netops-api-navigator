@@ -127,6 +127,18 @@ class GraphManager:
 
         self._check_ladybug_compat(conn)
 
+    def close(self) -> None:
+        """Release the process-local database handle.
+
+        LadybugDB's Python binding closes the underlying handle when the last
+        reference is released. Clearing it explicitly makes server factory and
+        doctor lifecycles deterministic, especially on Windows where open file
+        handles prevent cleanup or replacement.
+        """
+        with self._lock:
+            self._db = None
+            self._fts_available = False
+
     # ── Compatibility diagnostics ─────────────────────────────────
 
     @staticmethod

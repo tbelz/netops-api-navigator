@@ -13,10 +13,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from hpe_networking_central_mcp.compiler.ast_builder import build_ast_from_resolved  # noqa: E402
-from hpe_networking_central_mcp.compiler.frontend import ResolvedSpec, resolve_spec  # noqa: E402
-from hpe_networking_central_mcp.compiler.semantic_builder import build_semantic_overlay  # noqa: E402
-from hpe_networking_central_mcp.compiler.semantic_metrics import compute_semantic_metrics  # noqa: E402
+from netops_api_navigator.compiler.ast_builder import build_ast_from_resolved  # noqa: E402
+from netops_api_navigator.compiler.frontend import ResolvedSpec, resolve_spec  # noqa: E402
+from netops_api_navigator.compiler.semantic_builder import build_semantic_overlay  # noqa: E402
+from netops_api_navigator.compiler.semantic_metrics import compute_semantic_metrics  # noqa: E402
 
 
 def _default_cache() -> Path:

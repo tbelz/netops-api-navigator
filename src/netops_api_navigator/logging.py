@@ -29,4 +29,4 @@ def setup_logging(level: str = "INFO") -> structlog.stdlib.BoundLogger:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    return structlog.get_logger("hpe-networking-central-mcp")
+    return structlog.get_logger("netops-api-navigator")

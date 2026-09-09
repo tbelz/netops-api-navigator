@@ -4,7 +4,7 @@
 
 The graph schema uses a single bootstrap DDL layer:
 
-1. **Bootstrap DDL** ([src/hpe_networking_central_mcp/graph/schema.py](src/hpe_networking_central_mcp/graph/schema.py)) — Static node/relationship tables for the core domain model (Org, Site, Device, ConfigProfile, etc.) and knowledge layer (ApiEndpoint, ApiCategory, DocSection, Script).
+1. **Bootstrap DDL** ([src/netops_api_navigator/graph/schema.py](src/netops_api_navigator/graph/schema.py)) — Static node/relationship tables for the core domain model (Org, Site, Device, ConfigProfile, etc.) and knowledge layer (ApiEndpoint, ApiCategory, DocSection, Script).
 
 ## Runtime modes
 
@@ -21,7 +21,7 @@ The server has two startup modes:
   registers the graph query/write tools and the script-CRUD tools.
   Useful for local UI work and for review sessions where the agent
   drafts API calls / scripts that the user runs later in a connected
-  workspace. Locally: `uv run hpe-networking-central-mcp` with an empty
+  workspace. Locally: `uv run netops-api-navigator` with an empty
   env.
 
 ## Graph query tools (ADR-012)
@@ -213,7 +213,7 @@ cp build/spec_cache/glp/<file>.json            tests/fixtures/oas/real_excerpts/
 Do NOT hand-edit these fixtures — they are verbatim by policy.
 `tests/test_real_spec_ingest_smoke.py` runs every fixture through the
 full pipeline and asserts the post-flush invariants
-(`src/hpe_networking_central_mcp/graph/invariants.py`) hold.
+(`src/netops_api_navigator/graph/invariants.py`) hold.
 
 ### Build-time invariants gate
 
@@ -239,7 +239,7 @@ for the rationale.
 The shell scripts at the repo root (`test_all.sh`, `test_mcp.sh`,
 `test_inventory.sh`, etc.) exercise the built Docker image end-to-end
 and are **not** invoked by `pytest`. Build the image first with
-`docker build -t hpe-networking-central-mcp:test .` and then run them
+`docker build -t netops-api-navigator:test .` and then run them
 manually.
 
 ### Standalone smoke scripts

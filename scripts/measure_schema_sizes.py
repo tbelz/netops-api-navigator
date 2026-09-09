@@ -16,7 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from hpe_networking_central_mcp.oas_normalize import (  # noqa: E402
+from netops_api_navigator.oas_normalize import (  # noqa: E402
     normalize as normalize_spec,
     project_components,
     project_glossary,

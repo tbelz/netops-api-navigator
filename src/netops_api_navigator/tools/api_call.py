@@ -472,6 +472,77 @@ def register_api_call_tools(
         )
 
 
+def register_workshop_api_call_tool(
+    mcp,
+    settings: Settings,
+    client: CentralClient,
+    graph_manager: "GraphManager | None" = None,
+):
+    """Register a GET-only Central tool with no mutating method in its schema."""
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    def call_central_api(
+        path: str = "",
+        query_params: dict[str, str] | None = None,
+        calls: list[dict] | None = None,
+    ) -> str:
+        """Make one or more authenticated GET requests to Central API.
+
+        This workshop-safe variant cannot express POST, PUT, PATCH, or DELETE.
+        Discover exact paths and parameters with ``query_fts`` and
+        ``query_api_schema`` before calling it. Batch entries may contain only
+        ``path`` and ``query_params`` and are processed sequentially (cap 25).
+
+        Args:
+            path: Central API path for a single GET request; no base URL.
+            query_params: Optional string-valued query parameters.
+            calls: Optional list of GET calls with path and query_params.
+
+        Returns:
+            The same structured response envelope as the full Central tool.
+        """
+        if not settings.has_credentials:
+            raise ToolError(
+                "Central credentials not configured. Set CENTRAL_BASE_URL, "
+                "CENTRAL_CLIENT_ID, and CENTRAL_CLIENT_SECRET."
+            )
+
+        if calls is not None:
+            for item in calls:
+                method = str(item.get("method", "GET")).upper() if isinstance(item, dict) else ""
+                if method != "GET" or (isinstance(item, dict) and item.get("body") is not None):
+                    raise ToolError(
+                        "Workshop profile permits GET requests only; batch calls "
+                        "must not contain a mutating method or request body."
+                    )
+            normalized, err = _normalize_batch_calls(calls)
+            if err:
+                raise ToolError(err)
+            return _run_batch(client, "central", graph_manager, normalized, True)
+
+        if not path or not path.strip():
+            raise ToolError("Either `path` or `calls` must be provided.")
+        result = validate_call(graph_manager, "GET", path, query_params, None)
+        if not result.ok:
+            raise ToolError(format_validation_error(result))
+        return _make_api_call(
+            client,
+            "central",
+            path,
+            "GET",
+            query_params,
+            None,
+            warning_header=format_validation_warnings(result),
+            graph_manager=graph_manager,
+        )
+
+
 def register_greenlake_api_call_tools(
     mcp,
     settings: Settings,

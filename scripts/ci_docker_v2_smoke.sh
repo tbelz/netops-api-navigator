@@ -2,11 +2,11 @@
 set -euo pipefail
 
 IMAGE="${1:?image name required}"
-REPO="${2:-${GITHUB_REPOSITORY:-tbelz/hpe-networking-central-mcp}}"
+REPO="${2:-${GITHUB_REPOSITORY:-tbelz/netops-api-navigator}}"
 
 mkdir -p tmp
 
-VOL="central-mcp-v2-smoke-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
+VOL="netops-api-navigator-v2-smoke-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
 OUT="tmp/v2-smoke-stdout-$$.log"
 ERR="tmp/v2-smoke-stderr-$$.log"
 
@@ -25,10 +25,16 @@ import urllib.request
 
 repo = sys.argv[1]
 with urllib.request.urlopen(
-    f"https://api.github.com/repos/{repo}/releases/latest",
+    f"https://api.github.com/repos/{repo}/releases?per_page=100",
     timeout=15,
 ) as response:
-    print(json.load(response)["tag_name"])
+    releases = json.load(response)
+    release = next(
+        item
+        for item in releases
+        if str(item.get("tag_name", "")).startswith("knowledge-db-")
+    )
+    print(release["tag_name"])
 PY
 )"
 
@@ -206,6 +212,7 @@ expected_tools = {
     "save_script",
     "get_openapi_source_detail",
     "get_compiler_graph_health",
+    "get_server_status",
 }
 removed_tools = {
     "find_api_endpoints",

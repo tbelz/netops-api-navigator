@@ -7,17 +7,21 @@ a GitHub release and extracts it to the configured database path.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import shutil
 import tarfile
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote
 
 import httpx
 
-_DEFAULT_LOGGER = logging.getLogger("hpe_networking_central_mcp.knowledge_db")
+_DEFAULT_LOGGER = logging.getLogger("netops_api_navigator.knowledge_db")
 
 # How long to wait for the GitHub release-info API call. Kept short so a
 # spotty network does not eat the MCP client's ``initialize`` budget on
@@ -62,6 +66,7 @@ def _read_local_manifest_state(manifest_path: Path) -> dict:
         "knowledge_asset": manifest.get("knowledge_asset"),
         "knowledge_archive_member": manifest.get("knowledge_archive_member"),
         "knowledge_projection": manifest.get("knowledge_projection"),
+        "knowledge_asset_sha256": manifest.get("knowledge_asset_sha256"),
     }
 
 
@@ -80,6 +85,7 @@ def _write_local_manifest(
     asset_name: str = "knowledge_db.tar.gz",
     archive_member: str = "knowledge_db",
     projection: str = "legacy",
+    asset_sha256: str | None = None,
 ) -> None:
     """Copy the extracted manifest to ``dest_manifest`` and stamp the
     GitHub release ``tag_name`` so subsequent startups can short-circuit
@@ -97,7 +103,12 @@ def _write_local_manifest(
     manifest["knowledge_asset"] = asset_name
     manifest["knowledge_archive_member"] = archive_member
     manifest["knowledge_projection"] = projection
-    dest_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if asset_sha256:
+        manifest["knowledge_asset_sha256"] = asset_sha256
+    dest_manifest.parent.mkdir(parents=True, exist_ok=True)
+    temp_manifest = dest_manifest.with_name(f".{dest_manifest.name}.{uuid.uuid4().hex}.tmp")
+    temp_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    os.replace(temp_manifest, dest_manifest)
 
 
 def download_knowledge_db(
@@ -108,6 +119,9 @@ def download_knowledge_db(
     archive_member: str = "knowledge_db",
     projection: str = "legacy",
     manifest_name: str = "manifest.json",
+    release_tag: str = "",
+    expected_sha256: str = "",
+    require_digest: bool = False,
     force: bool = False,
     logger: Callable | None = None,
 ) -> bool:
@@ -151,15 +165,60 @@ def download_knowledge_db(
         _info("knowledge_db_skip", reason="KNOWLEDGE_RELEASE_REPO not set")
         return False
 
+    if expected_sha256 and not _normalise_sha256(expected_sha256):
+        _warn("knowledge_db_digest_invalid", asset=asset_name)
+        return False
+
     manifest_path = db_path.parent / manifest_name
     local_state = _read_local_manifest_state(manifest_path)
     local_tag = local_state.get("release_tag")
 
-    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+    if (
+        release_tag
+        and not force
+        and local_tag == release_tag
+        and db_path.exists()
+        and _local_install_matches(
+            local_state,
+            asset_name=asset_name,
+            archive_member=archive_member,
+            projection=projection,
+        )
+        and (
+            not expected_sha256
+            or local_state.get("knowledge_asset_sha256") == _normalise_sha256(expected_sha256)
+        )
+    ):
+        _info("knowledge_db_pinned_cache_hit", tag=release_tag, asset=asset_name)
+        return False
+
+    api_url = (
+        f"https://api.github.com/repos/{repo}/releases/tags/{quote(release_tag, safe='')}"
+        if release_tag
+        else f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    )
     try:
         resp = httpx.get(api_url, timeout=_RELEASE_INFO_TIMEOUT, follow_redirects=True)
         resp.raise_for_status()
-        release = resp.json()
+        payload = resp.json()
+        if release_tag:
+            release = payload
+        elif isinstance(payload, list):
+            release = next(
+                (
+                    item
+                    for item in payload
+                    if str(item.get("tag_name", "")).startswith("knowledge-db-")
+                ),
+                None,
+            )
+            if release is None:
+                _warn("knowledge_db_release_missing", prefix="knowledge-db-")
+                return False
+        else:
+            # Backward-compatible with older mocked callers and GitHub API
+            # proxies that expose one release object.
+            release = payload
     except Exception as exc:
         # Network unreachable / rate-limited / GitHub down. If we already
         # have a local DB on disk, keep using it instead of failing the
@@ -199,24 +258,48 @@ def download_knowledge_db(
         )
 
     asset_url = None
+    asset_digest = ""
     for asset in release.get("assets", []):
         if asset.get("name") == asset_name:
             asset_url = asset.get("browser_download_url")
+            asset_digest = _normalise_sha256(str(asset.get("digest", "")))
             break
 
     if not asset_url:
         _warn("knowledge_db_no_asset", release=remote_tag, asset=asset_name)
         return False
 
+    expected_digest = _normalise_sha256(expected_sha256) or asset_digest
+    if require_digest and not expected_digest:
+        _warn(
+            "knowledge_db_digest_missing",
+            release=remote_tag,
+            asset=asset_name,
+        )
+        return False
+
     _info("knowledge_db_downloading", url=asset_url)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tar_path = Path(tmp) / asset_name
-            with httpx.stream("GET", asset_url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as r:
+            with httpx.stream(
+                "GET", asset_url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True
+            ) as r:
                 r.raise_for_status()
                 with open(tar_path, "wb") as f:
                     for chunk in r.iter_bytes(chunk_size=65536):
                         f.write(chunk)
+
+            actual_digest = _sha256_file(tar_path)
+            if expected_digest and actual_digest != expected_digest:
+                _warn(
+                    "knowledge_db_digest_mismatch",
+                    release=remote_tag,
+                    asset=asset_name,
+                    expected=expected_digest,
+                    actual=actual_digest,
+                )
+                return False
 
             with tarfile.open(tar_path, "r:gz") as tf:
                 for member in tf.getmembers():
@@ -232,18 +315,13 @@ def download_knowledge_db(
                 )
                 return False
 
-            _remove_existing_install(db_path)
-            if extracted_db.is_dir():
-                shutil.copytree(extracted_db, db_path)
-            else:
-                shutil.copy2(extracted_db, db_path)
-
             extracted_manifest = Path(tmp) / "manifest.json"
             if not extracted_manifest.exists():
                 extracted_manifest = _download_manifest_asset(
                     release,
                     tmp_dir=Path(tmp),
                 )
+            _install_atomically(extracted_db, db_path)
             if extracted_manifest.exists():
                 _write_local_manifest(
                     extracted_manifest,
@@ -252,6 +330,7 @@ def download_knowledge_db(
                     asset_name=asset_name,
                     archive_member=archive_member,
                     projection=projection,
+                    asset_sha256=actual_digest,
                 )
 
             _info("knowledge_db_installed", tag=remote_tag, asset=asset_name)
@@ -259,6 +338,58 @@ def download_knowledge_db(
     except Exception as exc:
         _warn("knowledge_db_download_failed", error=str(exc))
         return False
+
+
+def _normalise_sha256(value: str) -> str:
+    value = value.strip().lower()
+    if value.startswith("sha256:"):
+        value = value.removeprefix("sha256:")
+    return value if len(value) == 64 and all(c in "0123456789abcdef" for c in value) else ""
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _install_atomically(extracted_db: Path, db_path: Path) -> None:
+    """Stage a database beside its destination and swap it into place.
+
+    The previous install remains available for rollback until the new path has
+    been activated. Keeping all rename operations on one filesystem makes the
+    replacement safe on both Windows and POSIX hosts.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    staging = db_path.with_name(f".{db_path.name}.install-{token}")
+    backup = db_path.with_name(f".{db_path.name}.backup-{token}")
+    if extracted_db.is_dir():
+        shutil.copytree(extracted_db, staging)
+    else:
+        shutil.copy2(extracted_db, staging)
+
+    had_existing = db_path.exists()
+    try:
+        if had_existing:
+            os.replace(db_path, backup)
+        os.replace(staging, db_path)
+    except Exception:
+        if staging.exists():
+            _remove_existing_install(staging)
+        if had_existing and backup.exists() and not db_path.exists():
+            os.replace(backup, db_path)
+        raise
+    else:
+        if backup.exists():
+            _remove_existing_install(backup)
+        # Sidecars belong to the old database handle and must not survive a
+        # successful replacement.
+        for sidecar in _candidate_sidecar_paths(db_path):
+            if sidecar.exists():
+                _remove_existing_install(sidecar)
 
 
 def _local_install_matches(

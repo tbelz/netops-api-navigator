@@ -11,7 +11,7 @@ from typing import Any
 import pyarrow as pa
 import real_ladybug as lb
 
-from hpe_networking_central_mcp.graph.schema import (
+from netops_api_navigator.graph.schema import (
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
 )

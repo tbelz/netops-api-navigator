@@ -1,6 +1,6 @@
-# HPE Networking Central MCP — Technical Overview
+# NetOps API Navigator — Technical Overview
 
-> Version: `0.2.0` · Python `≥ 3.12` · Transport: `stdio`
+> Version: `0.3.0` · Python `≥ 3.12` · Transport: `stdio`
 
 This document is the single authoritative reference for anyone who needs to understand
 how the MCP server is built, what contracts its components expose to one another, and how
@@ -54,7 +54,7 @@ data flows through the system at runtime.
 │  ┌──────▼───────────────────────────────────────────────────┐       │
 │  │                 Graph Layer  (graph/)                     │       │
 │  │  GraphManager ── LadybugDB (real_ladybug) ── schema.py   │       │
-│  │  GraphIPCServer ── Unix domain socket                    │       │
+│  │  GraphIPCServer ── authenticated loopback TCP            │       │
 │  └───────────────────────────────────────────────────────────┘       │
 │         │                                                            │
 │  ┌──────▼──────┐   ┌──────────────────┐   ┌──────────────────────┐  │
@@ -85,7 +85,7 @@ The server exposes three surfaces to MCP clients:
 ## 2. Repository Layout
 
 ```
-src/hpe_networking_central_mcp/
+src/netops_api_navigator/
 ├── server.py               # Entry point — wires all components, starts FastMCP
 ├── config.py               # Settings dataclass, loaded from environment
 ├── instructions.py         # Builds MCP system-instruction string
@@ -107,7 +107,7 @@ src/hpe_networking_central_mcp/
 ├── graph/
 │   ├── schema.py           # DDL constants (NODE_TABLES, REL_TABLES, etc.)
 │   ├── manager.py          # GraphManager — DB lifecycle, query/execute API
-│   ├── ipc_server.py       # Unix domain socket IPC for script subprocesses
+│   ├── ipc_server.py       # Authenticated loopback IPC for script subprocesses
 │   └── invariants.py       # Post-flush invariants for ingestion correctness
 │
 ├── tools/
@@ -140,25 +140,27 @@ Build-time tooling lives in `scripts/` and is not packaged into the wheel.
 ## 3. Startup Sequence
 
 ```
-server.py  load_settings()
+server.py  main() → load_settings() → create_server()
     │
-    ├── Validate Central credentials → sys.exit(1) if missing
-    ├── CentralClient.validate()     → OAuth2 token check, sys.exit(1) on failure
+    ├── Validate Central credential completeness
+    ├── CentralClient.validate()     → OAuth2 token check when credentials exist
     │
-    ├── download_knowledge_db()      → GitHub Release tar.gz download (if repo configured)
+    ├── download_knowledge_db()      → select knowledge-db-* release, verify SHA-256,
+    │                                  stage and atomically install
+    ├── _check_knowledge_pin()       → enforce optional release/digest pin
     ├── GraphManager.initialize()    → open / create LadybugDB, apply bootstrap DDL + migrations
     ├── GraphManager.create_fts_indexes()
     │
-    ├── _check_knowledge_schema_version()  → compare manifest.json schema_version (currently 9)
+    ├── _check_knowledge_schema_version()  → compare manifest.json schema_version (currently 10)
     │
     ├── _load_api_tree()             → MATCH ApiEndpoint → render_path_tree() → embed in instructions
     │
-    ├── FastMCP("hpe-networking-central-mcp", instructions=…)
-    ├── GraphIPCServer.start()       → Unix domain socket in background thread
+    ├── FastMCP("netops-api-navigator", instructions=…)
+    ├── GraphIPCServer.start()       → authenticated loopback TCP in full connected mode
     │
     ├── GreenLakeClient.validate()   → optional, degrades gracefully
-    ├── Copy central_helpers.py + _http_core.py → script_library_path
-    ├── sync_seeds_to_graph()        → sync bundled seed scripts to graph DB + disk
+    ├── Full profile: copy/sync script runtime and seeds
+    ├── Workshop profile: omit writes, scripts, GreenLake, compiler/hydration and seed jobs
     │
     ├── Register tools, resources, prompts
     │
@@ -170,7 +172,7 @@ server.py  load_settings()
 ### Schema-version gate
 
 `manifest.json` (shipped inside the knowledge DB tar.gz) carries a `schema_version`
-integer. The server requires **version 9**. A mismatch causes a hard `SystemExit`
+integer. The server requires **version 10**. A mismatch raises `StartupError`
 before tool registration to prevent serving stale graph data.
 
 ---
@@ -182,22 +184,26 @@ before tool registration to prevent serving stale graph data.
 ```python
 @dataclass(frozen=True)
 class Settings:
+    profile: str                 # full or fail-closed workshop
     central_base_url: str
     central_client_id: str
     central_client_secret: str
     glp_client_id: str          # falls back to central_client_id
     glp_client_secret: str      # falls back to central_client_secret
     glp_base_url: str           # default: https://global.api.greenlake.hpe.com
-    script_library_path: Path   # default: /scripts/library
-    graph_db_path: Path         # default: /data/graph_db
-    graph_ipc_socket: Path      # default: /tmp/ladybug_graph.sock
+    script_library_path: Path   # default: per-user application data
+    graph_db_path: Path         # default: per-user application data
+    spec_cache_path: Path       # default: per-user application cache
     inventory_cache_ttl: int    # default: 300 s
     glp_included_slugs: str     # comma-separated or "*" for all
     knowledge_release_repo: str # owner/repo for knowledge DB download
+    knowledge_release_tag: str  # optional immutable release pin
+    knowledge_asset_sha256: str # optional immutable digest pin
     read_only: bool             # refuses mutating API calls
 ```
 
-Loaded exclusively from environment variables via `load_settings()`.
+Loaded from environment variables via `load_settings()` and optionally overlaid
+by the server CLI before construction.
 The object is `frozen` — settings never change at runtime.
 
 **Derived properties:**
@@ -288,13 +294,14 @@ A single `lb.Database` is kept open; `lb.Connection` objects are created per ope
 
 #### `GraphIPCServer`
 
-Exposes the `GraphManager` to script subprocesses over a Unix domain socket.
+Exposes the `GraphManager` to authorized script subprocesses over an ephemeral
+TCP port bound exclusively to `127.0.0.1`.
 
 **Protocol:** newline-delimited JSON.
 
 ```json
 // Request
-{"id": 1, "method": "query"|"execute", "cypher": "MATCH …", "params": {}}
+{"id": 1, "token": "<capability>", "method": "query"|"execute", "cypher": "MATCH …", "params": {}}
 
 // Success response
 {"id": 1, "result": [{…}, …]}
@@ -303,8 +310,9 @@ Exposes the `GraphManager` to script subprocesses over a Unix domain socket.
 {"id": 1, "error": "message string"}
 ```
 
-One thread per connection (`socketserver.ThreadingMixIn`). Stale socket files are
-cleaned up on startup via `os.unlink`.
+One thread is used per connection (`socketserver.ThreadingMixIn`). A random
+capability token is created on every server start and passed only to child
+scripts together with the selected loopback port.
 
 #### `graph/schema.py` — DDL constants
 
@@ -450,7 +458,8 @@ table/relationship errors.
 ```
 CENTRAL_BASE_URL, CENTRAL_CLIENT_ID, CENTRAL_CLIENT_SECRET
 GLP_CLIENT_ID, GLP_CLIENT_SECRET, GLP_BASE_URL
-GRAPH_IPC_SOCKET   ← path to Unix domain socket
+GRAPH_IPC_HOST, GRAPH_IPC_PORT, GRAPH_IPC_TOKEN
+  ← authenticated loopback endpoint, injected only into child scripts
 ```
 
 **Output truncation:** 10 KB stdout, 5 KB stderr.
@@ -641,15 +650,17 @@ Script subprocess
   │  graph.query("MATCH (d:Device) …")
   │
   └─── GraphClient (in central_helpers.py)
-         │  connect to GRAPH_IPC_SOCKET
-         └─── Unix domain socket ──▶ GraphIPCServer (in server process)
+         │  connect to 127.0.0.1:GRAPH_IPC_PORT
+         └─── token-authenticated TCP ──▶ GraphIPCServer (in server process)
                                           │
                                           └─── GraphManager.query() / .execute()
 ```
 
-`GraphClient` in `central_helpers.py` connects to the socket path from
-`GRAPH_IPC_SOCKET` env var, sends a JSON request, reads the JSON response, and
-either returns `result` or raises an exception from `error`.
+`GraphClient` in `central_helpers.py` accepts only the loopback host, connects
+using `GRAPH_IPC_HOST` and `GRAPH_IPC_PORT`, and authenticates every JSON request
+with the per-process capability in `GRAPH_IPC_TOKEN`. These values are created
+at server start and injected only into authorized script subprocesses. The
+transport works on Windows and POSIX hosts without platform-specific sockets.
 
 ---
 
@@ -714,21 +725,40 @@ cp build/spec_cache/glp/<slug>.json            tests/fixtures/oas/real_excerpts/
 | `GREENLAKE_CLIENT_ID` / `GLP_CLIENT_ID` | ❌ | Falls back to Central | GreenLake client ID |
 | `GREENLAKE_CLIENT_SECRET` / `GLP_CLIENT_SECRET` | ❌ | Falls back to Central | GreenLake client secret |
 | `GLP_BASE_URL` | ❌ | `https://global.api.greenlake.hpe.com` | GreenLake base URL |
-| `SCRIPT_LIBRARY_PATH` | ❌ | `/scripts/library` | Writable directory for user scripts |
-| `GRAPH_DB_PATH` | ❌ | `/data/graph_db` | LadybugDB file path |
-| `GRAPH_IPC_SOCKET` | ❌ | `/tmp/ladybug_graph.sock` | Unix socket path for script IPC |
-| `KNOWLEDGE_RELEASE_REPO` | ❌ | — | `owner/repo` for knowledge DB download |
+| `MCP_PROFILE` | ❌ | `full` | Runtime surface: `full` or fail-closed `workshop` |
+| `SCRIPT_LIBRARY_PATH` | ❌ | per-user app data | Writable directory for user scripts |
+| `GRAPH_DB_PATH` | ❌ | per-user app data | LadybugDB file path |
+| `SPEC_CACHE_DIR` | ❌ | per-user cache | OpenAPI/compiler download cache |
+| `KNOWLEDGE_RELEASE_REPO` | ❌ | this repository | `owner/repo` for knowledge DB download |
+| `KNOWLEDGE_RELEASE_TAG` | ❌ | newest `knowledge-db-*` | Immutable knowledge snapshot pin |
+| `KNOWLEDGE_ASSET_SHA256` | ❌ | GitHub asset digest | Optional explicit SHA-256 pin |
 | `INVENTORY_CACHE_TTL` | ❌ | `300` | Seconds to cache inventory in memory |
 | `GLP_INCLUDED_SLUGS` | ❌ | `*` | Comma-separated GreenLake service slugs |
 | `READ_ONLY` | ❌ | `false` | Block mutating API calls |
 | `MCP_GRAPH_STALE_THRESHOLD_SECONDS` | ❌ | `900` | Freshness warning threshold |
+
+### Native Python package
+
+The supported Docker-free production path is the Python wheel built from this
+repository. `uv` installs a managed Python 3.12 runtime and the exact locked
+binary dependencies without requiring administrator rights, WSL, or Docker:
+
+```bash
+uv tool install --python 3.12 --no-build --constraints constraints.txt netops-api-navigator==0.3.0
+netops-api-navigator doctor --profile workshop --skip-credentials
+```
+
+Pull requests build and install the wheel on Windows x64, macOS Apple Silicon,
+and Linux, then exercise `doctor` and an MCP stdio handshake. Version tags
+publish wheel/sdist to PyPI and attach constraints, checksums, and the workshop
+starter ZIP to a GitHub release.
 
 ### Docker
 
 A `Dockerfile` is provided. The image entrypoint is:
 
 ```bash
-hpe-networking-central-mcp  # = python -m hpe_networking_central_mcp.server
+netops-api-navigator  # = python -m netops_api_navigator.server
 ```
 
 ### Claude Desktop / Claude Code
@@ -736,9 +766,9 @@ hpe-networking-central-mcp  # = python -m hpe_networking_central_mcp.server
 ```json
 {
   "mcpServers": {
-    "hpe-networking-central-mcp": {
+    "netops-api-navigator": {
       "command": "uvx",
-      "args": ["hpe-networking-central-mcp"],
+      "args": ["netops-api-navigator"],
       "env": {
         "CENTRAL_BASE_URL": "...",
         "CENTRAL_CLIENT_ID": "...",
@@ -759,6 +789,11 @@ When `READ_ONLY=true`:
 - The API endpoint path-tree embedded in system instructions omits non-GET methods.
 - The `api://endpoint-catalog` resource also filters to GET-only.
 - Local graph writes (`write_graph`) and script CRUD / execution remain available.
+
+`MCP_PROFILE=workshop` is stricter than general read-only mode. It permanently
+enables read-only operation and omits local graph writes, script CRUD/execution,
+GreenLake, compiler/hydration tools, prompts, and automatic seed jobs. Connected
+workshop sessions expose Central GET calls only.
 
 ---
 

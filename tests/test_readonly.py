@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -20,10 +19,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from hpe_networking_central_mcp._http_core import BaseHTTPClient, CentralAPIError
-from hpe_networking_central_mcp.config import Settings, load_settings
-from hpe_networking_central_mcp.graph.manager import GraphManager
-from hpe_networking_central_mcp.tools.execution import _build_env
+from netops_api_navigator._http_core import BaseHTTPClient, CentralAPIError
+from netops_api_navigator.config import Settings, load_settings
+from netops_api_navigator.tools.execution import _build_env
 
 
 # ── Settings parsing ────────────────────────────────────────────────
@@ -112,8 +110,8 @@ class TestApiCallToolsReadOnly:
     @pytest.fixture
     def setup(self, monkeypatch):
         from mcp.server.fastmcp import FastMCP
-        from hpe_networking_central_mcp.central_client import CentralClient
-        from hpe_networking_central_mcp.tools.api_call import (
+        from netops_api_navigator.central_client import CentralClient
+        from netops_api_navigator.tools.api_call import (
             register_api_call_tools, register_greenlake_api_call_tools,
         )
         # Avoid real HTTP from BaseHTTPClient init
@@ -145,6 +143,30 @@ class TestApiCallToolsReadOnly:
         with pytest.raises(ToolError) as exc_info:
             setup["call_greenlake_api"](path="some/path", method=method, body={"a": 1})
         assert "READ_ONLY" in str(exc_info.value).upper()
+
+
+class TestWorkshopApiTool:
+
+    def test_schema_has_no_method_or_body_and_batch_rejects_writes(self):
+        from mcp.server.fastmcp import FastMCP
+        from mcp.server.fastmcp.exceptions import ToolError
+        from netops_api_navigator.central_client import CentralClient
+        from netops_api_navigator.tools.api_call import register_workshop_api_call_tool
+
+        settings = Settings(
+            profile="workshop",
+            central_base_url="https://x",
+            central_client_id="cid",
+            central_client_secret="csec",
+        )
+        client = CentralClient("https://x", "cid", "csec")
+        mcp = FastMCP("test-workshop")
+        register_workshop_api_call_tool(mcp, settings, client, None)
+        tool = next(iter(mcp._tool_manager._tools.values()))
+
+        assert set(tool.parameters["properties"]) == {"path", "query_params", "calls"}
+        with pytest.raises(ToolError, match="GET"):
+            tool.fn(calls=[{"path": "x", "method": "POST", "body": {"x": 1}}])
 
 
 # ── _build_env propagation ──────────────────────────────────────────
@@ -205,7 +227,7 @@ class TestScriptRuntimeHttpxGuard:
         runtime_dir = (
             Path(__file__).parent.parent
             / "src"
-            / "hpe_networking_central_mcp"
+            / "netops_api_navigator"
             / "script_runtime"
         )
         assert (runtime_dir / "sitecustomize.py").exists()
@@ -246,7 +268,7 @@ class TestScriptRuntimeHttpxGuard:
         runtime_dir = (
             Path(__file__).parent.parent
             / "src"
-            / "hpe_networking_central_mcp"
+            / "netops_api_navigator"
             / "script_runtime"
         )
 
@@ -288,7 +310,7 @@ class TestScriptRuntimeHttpxGuard:
         runtime_dir = (
             Path(__file__).parent.parent
             / "src"
-            / "hpe_networking_central_mcp"
+            / "netops_api_navigator"
             / "script_runtime"
         )
 
@@ -331,7 +353,7 @@ class TestScriptRuntimeHttpxGuard:
 class TestInstructionsBanner:
 
     def test_banner_present_when_readonly(self):
-        from hpe_networking_central_mcp.instructions import build_instructions
+        from netops_api_navigator.instructions import build_instructions
         text = build_instructions(read_only=True)
         assert "READ_ONLY" in text.upper()
         # Mention that network changes are not allowed
@@ -339,6 +361,15 @@ class TestInstructionsBanner:
         assert "NOT" in upper and ("PERMITTED" in upper or "ALLOWED" in upper)
 
     def test_banner_absent_when_not_readonly(self):
-        from hpe_networking_central_mcp.instructions import build_instructions
+        from netops_api_navigator.instructions import build_instructions
         text = build_instructions(read_only=False)
         assert "READ_ONLY MODE ACTIVE" not in text.upper()
+
+    def test_workshop_instructions_do_not_advertise_mutating_surface(self):
+        from netops_api_navigator.instructions import build_instructions
+
+        text = build_instructions(read_only=True, workshop_mode=True)
+        assert "WORKSHOP PROFILE" in text
+        assert "GET-ONLY" in text
+        assert "write_graph" not in text
+        assert "execute_script" not in text

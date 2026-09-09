@@ -10,14 +10,14 @@ import tempfile
 import pytest
 import real_ladybug as lb
 
-from hpe_networking_central_mcp.compiler.ast_builder import build_ast_graph
-from hpe_networking_central_mcp.compiler.catalog_identity import canonical_body_hash
-from hpe_networking_central_mcp.compiler.projection_writer import (
+from netops_api_navigator.compiler.ast_builder import build_ast_graph
+from netops_api_navigator.compiler.catalog_identity import canonical_body_hash
+from netops_api_navigator.compiler.projection_writer import (
     CompilerProjectionData,
     build_compiler_projection_database,
     collect_compiler_projection_graph,
 )
-from hpe_networking_central_mcp.compiler.semantic_builder import build_semantic_overlay
+from netops_api_navigator.compiler.semantic_builder import build_semantic_overlay
 
 pytestmark = [pytest.mark.compiler, pytest.mark.unit]
 

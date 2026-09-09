@@ -44,6 +44,6 @@ ENV SCRIPT_LIBRARY_PATH=/scripts/library
 ENV DOCS_PATH=/docs
 ENV SPEC_CACHE_DIR=/data/oas_cache
 ENV GRAPH_DB_PATH=/data/graph_db
-ENV KNOWLEDGE_RELEASE_REPO=tbelz/hpe-networking-central-mcp
+ENV KNOWLEDGE_RELEASE_REPO=tbelz/netops-api-navigator
 
-ENTRYPOINT ["hpe-networking-central-mcp"]
+ENTRYPOINT ["netops-api-navigator"]

@@ -9,18 +9,18 @@ import tempfile
 
 import pytest
 
-from hpe_networking_central_mcp.compiler.ast_builder import build_ast_graph
-from hpe_networking_central_mcp.compiler.ast_writer import build_ast_database
-from hpe_networking_central_mcp.compiler.detail_reader import (
+from netops_api_navigator.compiler.ast_builder import build_ast_graph
+from netops_api_navigator.compiler.ast_writer import build_ast_database
+from netops_api_navigator.compiler.detail_reader import (
     ProjectionRowNotFoundError,
     UnknownProjectionTableError,
     load_projection_detail,
 )
-from hpe_networking_central_mcp.compiler.projection_writer import (
+from netops_api_navigator.compiler.projection_writer import (
     build_compiler_projection_database,
 )
-from hpe_networking_central_mcp.compiler.semantic_builder import build_semantic_overlay
-from hpe_networking_central_mcp.compiler.semantic_writer import write_semantic_database
+from netops_api_navigator.compiler.semantic_builder import build_semantic_overlay
+from netops_api_navigator.compiler.semantic_writer import write_semantic_database
 
 pytestmark = [pytest.mark.compiler, pytest.mark.unit]
 

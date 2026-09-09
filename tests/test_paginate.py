@@ -22,7 +22,7 @@ import pytest
 _PKG_DIR = (
     Path(__file__).resolve().parent.parent
     / "src"
-    / "hpe_networking_central_mcp"
+    / "netops_api_navigator"
 )
 
 

@@ -28,7 +28,7 @@ if str(_SRC_DIR) not in sys.path:
 
 import real_ladybug as lb  # noqa: E402
 
-from hpe_networking_central_mcp.graph.schema import (  # noqa: E402
+from netops_api_navigator.graph.schema import (  # noqa: E402
     KNOWLEDGE_NODE_TABLES,
     KNOWLEDGE_REL_TABLES,
     NODE_TABLES,
@@ -103,7 +103,7 @@ def _seed_endpoint(conn, method: str, path: str) -> str:
 
 
 def _seed(conn) -> None:
-    from hpe_networking_central_mcp.oas_schema_graph import populate_schema_graph
+    from netops_api_navigator.oas_schema_graph import populate_schema_graph
 
     _seed_endpoint(conn, "POST", "/v1/ntp/server")
     populate_schema_graph(
@@ -202,7 +202,7 @@ class TestCliBridgeRecipe:
 
 class TestCliBridgeInvariants:
     def test_inv13_and_inv14_pass(self, fresh_db):
-        from hpe_networking_central_mcp.graph.invariants import (
+        from netops_api_navigator.graph.invariants import (
             check_cli_command_has_single_endpoint,
             check_yang_path_has_module_edge,
         )

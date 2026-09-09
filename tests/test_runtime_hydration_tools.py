@@ -11,8 +11,8 @@ import pytest
 import real_ladybug as lb
 from mcp.server.fastmcp import FastMCP
 
-from hpe_networking_central_mcp.config import Settings
-from hpe_networking_central_mcp.graph.schema import (
+from netops_api_navigator.config import Settings
+from netops_api_navigator.graph.schema import (
     HYDRATION_NODE_TABLES,
     HYDRATION_REL_TABLES,
     KNOWLEDGE_NODE_TABLES,
@@ -24,11 +24,11 @@ from hpe_networking_central_mcp.graph.schema import (
     get_rel_tables,
     get_rel_tables_with_endpoints,
 )
-from hpe_networking_central_mcp.tools.hydration import (
+from netops_api_navigator.tools.hydration import (
     classify_hydration_candidate,
     register_runtime_hydration_tools,
 )
-from hpe_networking_central_mcp.tools.graph import register_graph_tools
+from netops_api_navigator.tools.graph import register_graph_tools
 
 pytestmark = pytest.mark.unit
 
