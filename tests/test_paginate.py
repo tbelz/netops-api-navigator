@@ -89,3 +89,156 @@ class TestPaginateHardFail:
 
         out = api.paginate("/dummy", max_pages=5)
         assert out == [{"i": 1}]
+
+    def test_raises_when_max_pages_hit_without_server_total(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(return_value={"aps": [{"i": 1}]})
+
+        with pytest.raises(helpers.PaginationError) as exc:
+            api.paginate("/dummy", page_size=1, max_pages=2)
+        assert exc.value.error_code == "PAGINATION_TRUNCATED"
+        assert "did not report a total" in str(exc.value)
+
+    def test_cursor_pagination_stops_on_null_next(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}], "next": "cursor-2"},
+                {"items": [{"i": 2}], "next": None},
+            ]
+        )
+
+        out = api.paginate("/dummy", max_pages=5)
+        assert out == [{"i": 1}, {"i": 2}]
+        assert api._request.call_args_list[1].kwargs["params"]["next"] == "cursor-2"
+
+    def test_offset_pagination_continues_when_next_is_null(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "total": 3, "next": None},
+                {"items": [{"i": 3}], "total": 3, "next": None},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=3)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+        second_page = api._request.call_args_list[1].kwargs["params"]
+        assert second_page["offset"] == "2"
+        assert "next" not in second_page
+
+    def test_single_page_cursor_stops_on_null_next_without_total(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            return_value={"items": [{"i": 1}, {"i": 2}], "next": None}
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}]
+        api._request.assert_called_once()
+
+    def test_page_local_count_does_not_truncate_cursor_pagination(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "count": 2, "next": "cursor-2"},
+                {"items": [{"i": 3}], "count": 1, "next": None},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=3)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+        assert api._request.call_args_list[1].kwargs["params"]["next"] == "cursor-2"
+
+    def test_preserves_first_page_total_when_later_page_omits_it(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "total": 3},
+                {"items": [{"i": 3}]},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+
+    def test_short_offset_page_without_total_is_complete(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "count": 2, "offset": 0},
+                {"items": [{"i": 3}], "count": 1, "offset": 2},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+
+    def test_greenlake_pagination_remains_offset_based(self, helpers):
+        api = helpers.GreenLakeAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {
+                    "items": [{"i": 1}, {"i": 2}],
+                    "total": 3,
+                    "next": "not-a-greenlake-cursor",
+                },
+                {"items": [{"i": 3}], "total": 3},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=2)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+        second_page = api._request.call_args_list[1].kwargs["params"]
+        assert second_page["offset"] == "2"
+        assert "next" not in second_page
+
+    def test_greenlake_count_is_used_as_collection_total(self, helpers):
+        api = helpers.GreenLakeAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            return_value={"items": [{"i": 1}, {"i": 2}], "count": 2}
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=1)
+
+        assert out == [{"i": 1}, {"i": 2}]
+        api._request.assert_called_once()
+
+    def test_repeated_cursor_raises(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            return_value={"items": [{"i": 1}], "next": "same"}
+        )
+
+        with pytest.raises(helpers.PaginationError) as exc:
+            api.paginate("/dummy", max_pages=5)
+        assert exc.value.error_code == "PAGINATION_LOOP"
+
+    def test_script_helper_allows_explicit_page_cap_above_workshop_limit(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(return_value={"items": [{"i": 1}], "total": 1})
+
+        assert api.paginate("/dummy", max_pages=51) == [{"i": 1}]
+
+    def test_auto_detected_item_key_is_reused_on_later_pages(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"aps": [{"i": 1}], "total": 2},
+                {"warnings": [], "aps": [{"i": 2}], "total": 2},
+            ]
+        )
+
+        assert api.paginate("/dummy") == [{"i": 1}, {"i": 2}]

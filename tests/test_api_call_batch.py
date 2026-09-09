@@ -18,7 +18,6 @@ from netops_api_navigator.config import Settings
 from netops_api_navigator.graph.manager import GraphManager
 from netops_api_navigator.tools.api_call import register_api_call_tools
 
-
 # ── fixtures ────────────────────────────────────────────────────────
 
 
@@ -47,7 +46,8 @@ def gm_with_endpoints(tmp_path_factory):
             "})",
             {"eid": f"{method}:{path}", "m": method, "p": path},
         )
-    return gm
+    yield gm
+    gm.close()
 
 
 def _make_tool(settings: Settings, gm: GraphManager | None = None):

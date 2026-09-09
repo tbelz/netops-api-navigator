@@ -44,6 +44,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     schema_summary: dict[str, Any] = field(default_factory=dict)
+    required_query_params: set[str] = field(default_factory=set)
 
     @property
     def ok(self) -> bool:
@@ -78,6 +79,8 @@ def validate_call(
     path: str,
     query_params: dict[str, str] | None,
     body: dict | None,
+    *,
+    ignored_required_query_params: set[str] | None = None,
 ) -> ValidationResult:
     """Pre-flight validation against the graph.
 
@@ -115,10 +118,17 @@ def validate_call(
         )
 
     supplied_query = set((query_params or {}).keys())
+    ignored_required_query_params = {
+        str(name).lower() for name in (ignored_required_query_params or set())
+    }
     for row in param_rows or []:
         loc = (row.get("location") or "").lower()
         name = row.get("name") or ""
         if not name or loc != "query":
+            continue
+        normalized_name = name.lower()
+        result.required_query_params.add(normalized_name)
+        if normalized_name in ignored_required_query_params:
             continue
         if name not in supplied_query:
             result.errors.append(f"Missing required query parameter: {name!r}.")

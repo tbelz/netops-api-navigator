@@ -155,7 +155,7 @@ startup, and `execute_script`.
         "run", "-i", "--rm", "--pull", "always",
         "-v", "central-scripts:/scripts/library",
         "ghcr.io/tbelz/netops-api-navigator:main",
-        "--central-url", "https://apigw-YOUR_CLUSTER.central.arubanetworks.com",
+        "--central-url", "https://de1.api.central.arubanetworks.com",
         "--client-id", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_ID",
         "--client-secret", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_SECRET",
         "--glp-client-id", "REPLACE_WITH_YOUR_GLP_CLIENT_ID",
@@ -187,12 +187,16 @@ You can pass the same settings through the host environment, Docker `-e` flags,
 an `--env-file`, or the CLI flags shown above.
 
 ```env
-CENTRAL_BASE_URL=https://apigw-YOUR_CLUSTER.central.arubanetworks.com
+CENTRAL_BASE_URL=https://de1.api.central.arubanetworks.com
 CENTRAL_CLIENT_ID=your_client_id
 CENTRAL_CLIENT_SECRET=your_client_secret
 GREENLAKE_CLIENT_ID=your_glp_client_id
 GREENLAKE_CLIENT_SECRET=your_glp_client_secret
 ```
+
+Copy the exact account-specific Base URL from **Central → Menu → API Gateway →
+REST API**. Do not reuse a Lab or another tenant's cluster URL; a valid token
+sent to the wrong Central cluster can still be rejected with HTTP 403.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -252,15 +256,22 @@ guardrail rather than a sandbox for untrusted script authors.
 
 Set `MCP_PROFILE=workshop` or pass `--profile workshop` for the smallest,
 fail-closed surface intended for guided onboarding. The profile always enables
-read-only mode and exposes only graph/API discovery, a secret-free status tool,
-and—when valid Central credentials are present—GET-only Central API calls. It
-does not register script creation or execution, local graph writes, GreenLake,
-runtime hydration, compiler tools, prompts, or automatic seed jobs.
+network read-only mode and exposes graph/API discovery, live topology queries,
+a secret-free status tool, and—when valid Central credentials are present—GET-only
+Central API calls plus bounded collection pagination. Two trusted package seeds
+populate sites, devices, groups, and L2 links in the local graph at startup.
+User-authored script creation/execution, direct local graph writes, GreenLake,
+runtime hydration, compiler tools, and prompts remain unavailable.
 
 Run `netops-api-navigator doctor --profile workshop` before connecting an
 MCP client. Add `--skip-credentials` to validate only the local installation.
 The prebuilt [`workshop/`](workshop/) starter is included as a ZIP in tagged
 GitHub releases.
+
+`get_server_status.central_connected=true` confirms OAuth token issuance only;
+Central still authorizes each API endpoint for the token's workspace and user
+role. Use `topology_sync` and `graph://seed-status` to detect endpoint-level
+403 errors or partial topology refreshes.
 
 ### Compiler / v2 Smoke
 
@@ -325,7 +336,7 @@ domain.
 | `query_topology` | Always | Runtime topology graph queries over orgs, sites, devices, groups, and neighbor edges. |
 | `query_graph` | Always | Broad read-only Cypher escape hatch for cross-domain graph queries. |
 | `get_raw_schema` | Always | Fetch raw OpenAPI JSON for known `SchemaComponent` IDs when graph fields are not enough. |
-| `write_graph` | Always | Local graph writes for enrichment and script metadata. |
+| `write_graph` | Full profile | Local graph writes for enrichment and script metadata. |
 
 The read tools support batch mode with `queries=[...]`. Responses are capped to
 keep MCP payloads manageable; oversized cells return truncation envelopes with
@@ -336,6 +347,7 @@ next-step hints.
 | Tool | Mode | Purpose |
 | --- | --- | --- |
 | `call_central_api` | Connected | Authenticated Central REST call with graph-backed pre-flight validation. |
+| `paginate_central_api` | Connected workshop | Complete, bounded GET-only Central collection fetch with cursor/offset auto-detection. |
 | `call_greenlake_api` | Connected plus GLP credentials | Authenticated GreenLake Platform REST call with validation. |
 
 ### Script Tools

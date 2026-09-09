@@ -7,6 +7,8 @@ import argparse
 import json
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
 EXPECTED_OFFLINE_WORKSHOP_TOOLS = {
     "get_raw_schema",
@@ -14,6 +16,7 @@ EXPECTED_OFFLINE_WORKSHOP_TOOLS = {
     "query_api_schema",
     "query_fts",
     "query_graph",
+    "query_topology",
     "query_yang",
 }
 
@@ -69,6 +72,17 @@ def main() -> int:
     if server_name != "netops-api-navigator":
         print(f"Unexpected server name: {server_name!r}", file=sys.stderr)
         return 1
+    server_version = initialize.get("result", {}).get("serverInfo", {}).get("version")
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    expected_version = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
+    if server_version != expected_version:
+        print(
+            f"Unexpected server version: {server_version!r}; expected {expected_version!r}",
+            file=sys.stderr,
+        )
+        return 1
     tools = {tool["name"] for tool in tools_response.get("result", {}).get("tools", [])}
     if tools != EXPECTED_OFFLINE_WORKSHOP_TOOLS:
         print(
@@ -77,7 +91,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(json.dumps({"server": server_name, "tools": sorted(tools)}, indent=2))
+    print(
+        json.dumps(
+            {"server": server_name, "version": server_version, "tools": sorted(tools)},
+            indent=2,
+        )
+    )
     return 0
 
 

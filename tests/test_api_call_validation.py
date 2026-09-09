@@ -9,8 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from netops_api_navigator.tools.api_call_validation import (
@@ -21,7 +19,6 @@ from netops_api_navigator.tools.api_call_validation import (
     normalise_path,
     validate_call,
 )
-
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -115,6 +112,23 @@ class TestRequiredQueryParams:
             gm, "GET", "/cfg/things", {"scopeId": "abc"}, None
         )
         assert result.ok
+        assert result.required_query_params == {"scopeid"}
+
+    def test_wrong_case_required_query_param_blocks(self):
+        gm = _FakeGraph(
+            {
+                "required_params": [
+                    {"name": "scopeId", "location": "query"},
+                ]
+            }
+        )
+
+        result = validate_call(
+            gm, "GET", "/cfg/things", {"scopeid": "abc"}, None
+        )
+
+        assert not result.ok
+        assert any("scopeId" in error for error in result.errors)
 
     def test_required_path_param_ignored(self):
         # Required path params are validated by the server returning 404,
@@ -128,6 +142,27 @@ class TestRequiredQueryParams:
         )
         result = validate_call(gm, "GET", "/things/abc", None, None)
         assert result.ok
+
+    def test_caller_can_own_required_pagination_params(self):
+        gm = _FakeGraph(
+            {
+                "required_params": [
+                    {"name": "limit", "location": "query"},
+                    {"name": "next", "location": "query"},
+                    {"name": "scopeId", "location": "query"},
+                ]
+            }
+        )
+        result = validate_call(
+            gm,
+            "GET",
+            "/things",
+            {"scopeId": "abc"},
+            None,
+            ignored_required_query_params={"limit", "next", "offset"},
+        )
+        assert result.ok
+        assert result.required_query_params == {"limit", "next", "scopeid"}
 
 
 # ── request body validation ──────────────────────────────────────────

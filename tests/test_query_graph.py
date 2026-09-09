@@ -26,7 +26,8 @@ def gm(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("qg") / "test.db"
     gm = GraphManager(db_path)
     gm.initialize()
-    return gm
+    yield gm
+    gm.close()
 
 
 def _make_query_tool(gm):

@@ -9,23 +9,20 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from netops_api_navigator.graph.manager import GraphManager
 from netops_api_navigator.config import Settings
+from netops_api_navigator.graph.manager import GraphManager
 from netops_api_navigator.tools.scripts import (
     _cypher_escape,
     _cypher_string_list,
     _validate_filename,
     sync_seeds_to_graph,
 )
-
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
@@ -36,7 +33,8 @@ def gm(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("scripts_db") / "test.db"
     gm = GraphManager(db_path)
     gm.initialize()
-    return gm
+    yield gm
+    gm.close()
 
 
 @pytest.fixture
@@ -56,6 +54,7 @@ def settings(tmp_path):
 def tools(gm, settings):
     """Register script tools and return tool function dict."""
     from mcp.server.fastmcp import FastMCP
+
     from netops_api_navigator.tools.scripts import register_script_tools
 
     mcp = FastMCP("test")

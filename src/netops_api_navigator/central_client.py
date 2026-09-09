@@ -9,11 +9,12 @@ from __future__ import annotations
 import structlog
 
 from ._http_core import (  # noqa: F401 — re-exported for backward compat
+    AuthenticationError,
     BaseHTTPClient,
     CentralAPIError,
-    AuthenticationError,
-    RateLimitError,
     NotFoundError,
+    PaginationError,
+    RateLimitError,
     parse_error_body,
     parse_retry_wait,
 )
@@ -30,6 +31,9 @@ class CentralClient(BaseHTTPClient):
 
 class GreenLakeClient(BaseHTTPClient):
     """HTTP client for HPE GreenLake Platform API."""
+
+    _PAGINATION_STYLE = "offset"
+    _PAGINATION_TOTAL_KEYS = ("total", "count")
 
     def __init__(self, base_url: str, client_id: str, client_secret: str) -> None:
         super().__init__(base_url, client_id, client_secret, logger=logger)

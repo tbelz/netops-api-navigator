@@ -115,6 +115,8 @@ class BaseHTTPClient:
     """
 
     _MAX_RATE_LIMIT_WAIT = 60  # seconds
+    _PAGINATION_STYLE = "auto"
+    _PAGINATION_TOTAL_KEYS = ("total",)
 
     def __init__(self, base_url: str, client_id: str, client_secret: str,
                  *, logger=None) -> None:
@@ -161,6 +163,150 @@ class BaseHTTPClient:
 
     def get(self, path: str, params: dict | None = None) -> dict:
         return self._request("GET", path, params=params)
+
+    def paginate(
+        self,
+        path: str,
+        params: dict | None = None,
+        *,
+        max_pages: int = 50,
+        page_size: int = 100,
+        item_key: str | None = None,
+    ) -> list[dict]:
+        """Fetch every page from a list endpoint with bounded pagination.
+
+        Cursor pagination is selected when a response contains a non-null
+        ``next`` value. Other responses use an integer ``offset``. The method
+        raises instead of returning a silently truncated list when the page
+        limit is reached.
+        """
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        if page_size < 1:
+            raise ValueError("page_size must be at least 1")
+
+        all_items: list[dict] = []
+        merged = dict(params or {})
+        merged["limit"] = str(page_size)
+        try:
+            initial_offset = int(merged.get("offset", 0))
+        except (TypeError, ValueError):
+            initial_offset = 0
+        page_params = dict(merged)
+        seen_cursors: set[str] = set()
+        resolved_item_key = item_key
+        pagination_style: str | None = None
+        total = 0
+
+        for page_num in range(1, max_pages + 1):
+            try:
+                response = self._request("GET", path, params=page_params)
+            except CentralAPIError as exc:
+                position = "first page" if page_num == 1 else f"page {page_num}"
+                raise PaginationError(
+                    exc.status_code,
+                    exc.error_code,
+                    f"Pagination failed on {position}: {exc.message}",
+                    exc.debug_id,
+                ) from exc
+
+            if not isinstance(response, dict):
+                raise PaginationError(
+                    0,
+                    "INVALID_PAGINATION_RESPONSE",
+                    f"Expected dict response, got {type(response).__name__}",
+                )
+
+            if resolved_item_key is None:
+                resolved_item_key = detect_item_key(response)
+            if resolved_item_key is None:
+                raise PaginationError(
+                    0,
+                    "ITEM_ARRAY_NOT_FOUND",
+                    f"Cannot detect item array in response keys: {list(response.keys())}",
+                )
+            items = response.get(resolved_item_key)
+            if not isinstance(items, list):
+                raise PaginationError(
+                    0,
+                    "INVALID_ITEM_ARRAY",
+                    f"Response field {resolved_item_key!r} is not an array.",
+                )
+            all_items.extend(items)
+
+            # Central commonly uses ``count`` for the number of items in the
+            # current page, while GreenLake uses it as a collection total on
+            # some endpoints. Subclasses opt in to the keys whose semantics
+            # are safe for their API family.
+            raw_total = next(
+                (
+                    response[key]
+                    for key in self._PAGINATION_TOTAL_KEYS
+                    if response.get(key) is not None
+                ),
+                None,
+            )
+            if raw_total is not None:
+                try:
+                    reported_total = int(raw_total or 0)
+                except (TypeError, ValueError):
+                    reported_total = 0
+                if reported_total > 0:
+                    total = reported_total
+            if total and len(all_items) >= total:
+                return all_items
+            if not items:
+                return all_items
+
+            if pagination_style is None:
+                if self._PAGINATION_STYLE != "auto":
+                    pagination_style = self._PAGINATION_STYLE
+                elif response.get("next") is not None:
+                    pagination_style = "cursor"
+                elif (total and len(all_items) < total) or "offset" in response:
+                    pagination_style = "offset"
+                elif "next" in response:
+                    pagination_style = "cursor"
+                else:
+                    pagination_style = "offset"
+
+            if (
+                pagination_style == "offset"
+                and not total
+                and len(items) < page_size
+            ):
+                return all_items
+
+            if pagination_style == "cursor":
+                cursor = response.get("next")
+                if cursor is None:
+                    return all_items
+                cursor_text = str(cursor)
+                if not cursor_text:
+                    return all_items
+                if cursor_text in seen_cursors:
+                    raise PaginationError(
+                        0,
+                        "PAGINATION_LOOP",
+                        f"Server repeated cursor {cursor_text!r} on page {page_num}.",
+                    )
+                seen_cursors.add(cursor_text)
+                page_params = dict(merged)
+                page_params["next"] = cursor_text
+            else:
+                page_params = dict(merged)
+                page_params["offset"] = str(initial_offset + len(all_items))
+
+        total_suffix = f"/{total}" if total else " (server did not report a total)"
+        raise PaginationError(
+            0,
+            "PAGINATION_TRUNCATED",
+            (
+                f"paginate() hit max_pages={max_pages} after collecting "
+                f"{len(all_items)}{total_suffix} items. Increase max_pages or "
+                "pre-filter the query server-side to keep the result bounded."
+            ),
+        )
 
     def post(self, path: str, json_body: dict | None = None, params: dict | None = None) -> dict:
         return self._request("POST", path, params=params, json_body=json_body)
