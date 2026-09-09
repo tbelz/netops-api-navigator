@@ -348,11 +348,18 @@ def _run_auto_seeds(
                 summary = json.loads(stdout) if stdout else None
             except json.JSONDecodeError:
                 summary = None
+            warning_lines = [
+                line.strip()
+                for line in stderr.splitlines()
+                if line.lstrip().lower().startswith("warning:")
+            ]
             if isinstance(summary, dict):
                 entry["summary"] = summary
                 reported_errors = summary.get("errors") or summary.get("error")
-                if exit_code == 0 and reported_errors:
+                if exit_code == 0 and (reported_errors or warning_lines):
                     entry["status"] = "partial"
+            elif exit_code == 0 and warning_lines:
+                entry["status"] = "partial"
             if exit_code != 0:
                 entry["error"] = (stderr or stdout)[:500]
             elif stderr:

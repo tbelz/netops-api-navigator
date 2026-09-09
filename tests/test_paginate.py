@@ -130,6 +130,20 @@ class TestPaginateHardFail:
         assert second_page["offset"] == "2"
         assert "next" not in second_page
 
+    def test_page_local_count_does_not_truncate_cursor_pagination(self, helpers):
+        api = helpers.CentralAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            side_effect=[
+                {"items": [{"i": 1}, {"i": 2}], "count": 2, "next": "cursor-2"},
+                {"items": [{"i": 3}], "count": 1, "next": None},
+            ]
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=3)
+        assert out == [{"i": 1}, {"i": 2}, {"i": 3}]
+        assert api._request.call_args_list[1].kwargs["params"]["next"] == "cursor-2"
+
     def test_repeated_cursor_raises(self, helpers):
         api = helpers.CentralAPI()
         api._ensure_token = MagicMock()

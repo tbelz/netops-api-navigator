@@ -264,6 +264,33 @@ def test_auto_seed_reports_partial_success_when_summary_contains_errors(monkeypa
     assert runtime.seed_status["seed.py"]["summary"]["errors"] == ["GET failed"]
 
 
+def test_auto_seed_reports_partial_success_when_stderr_contains_warning(monkeypatch):
+    import netops_api_navigator.server as server
+
+    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={})
+    monkeypatch.setattr(server, "_get_auto_run_seeds", lambda settings, allowed=None: ["seed.py"])
+    monkeypatch.setattr(
+        server,
+        "_run_script",
+        lambda settings, script_name, ipc_env=None: json.dumps(
+            {
+                "exit_code": 0,
+                "stdout": json.dumps({"sites_processed": 1, "errors": []}),
+                "stderr": (
+                    "Enriching topology for 1 sites...\n"
+                    "Warning: topology fetch failed for site abc: [403] Access denied\n"
+                ),
+            }
+        ),
+    )
+    monkeypatch.setattr(server, "_update_script_node", lambda *args: None)
+
+    server._run_auto_seeds(runtime, {})
+
+    assert runtime.seed_status["seed.py"]["status"] == "partial"
+    assert "Warning: topology fetch failed" in runtime.seed_status["seed.py"]["diagnostics"]
+
+
 def test_auto_seed_status_prepopulates_pending_jobs(monkeypatch):
     import netops_api_navigator.server as server
 

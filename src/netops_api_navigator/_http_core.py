@@ -231,7 +231,10 @@ class BaseHTTPClient:
                 )
             all_items.extend(items)
 
-            raw_total = response.get("total", response.get("count", 0))
+            # Central commonly uses ``count`` for the number of items in the
+            # current page. Only ``total`` is safe as a collection-completion
+            # signal; cursor/empty-page handling covers responses without it.
+            raw_total = response.get("total", 0)
             try:
                 total = int(raw_total or 0)
             except (TypeError, ValueError):
