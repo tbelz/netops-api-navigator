@@ -116,6 +116,7 @@ class BaseHTTPClient:
 
     _MAX_RATE_LIMIT_WAIT = 60  # seconds
     _PAGINATION_STYLE = "auto"
+    _PAGINATION_TOTAL_KEYS = ("total",)
 
     def __init__(self, base_url: str, client_id: str, client_secret: str,
                  *, logger=None) -> None:
@@ -234,9 +235,17 @@ class BaseHTTPClient:
             all_items.extend(items)
 
             # Central commonly uses ``count`` for the number of items in the
-            # current page. Only ``total`` is safe as a collection-completion
-            # signal; cursor/empty-page handling covers responses without it.
-            raw_total = response.get("total")
+            # current page, while GreenLake uses it as a collection total on
+            # some endpoints. Subclasses opt in to the keys whose semantics
+            # are safe for their API family.
+            raw_total = next(
+                (
+                    response[key]
+                    for key in self._PAGINATION_TOTAL_KEYS
+                    if response.get(key) is not None
+                ),
+                None,
+            )
             if raw_total is not None:
                 try:
                     reported_total = int(raw_total or 0)

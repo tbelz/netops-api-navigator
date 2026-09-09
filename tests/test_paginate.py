@@ -201,6 +201,18 @@ class TestPaginateHardFail:
         assert second_page["offset"] == "2"
         assert "next" not in second_page
 
+    def test_greenlake_count_is_used_as_collection_total(self, helpers):
+        api = helpers.GreenLakeAPI()
+        api._ensure_token = MagicMock()
+        api._request = MagicMock(
+            return_value={"items": [{"i": 1}, {"i": 2}], "count": 2}
+        )
+
+        out = api.paginate("/dummy", page_size=2, max_pages=1)
+
+        assert out == [{"i": 1}, {"i": 2}]
+        api._request.assert_called_once()
+
     def test_repeated_cursor_raises(self, helpers):
         api = helpers.CentralAPI()
         api._ensure_token = MagicMock()

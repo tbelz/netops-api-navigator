@@ -79,6 +79,7 @@ class GreenLakeAPI(BaseHTTPClient):
     """
 
     _PAGINATION_STYLE = "offset"
+    _PAGINATION_TOTAL_KEYS = ("total", "count")
 
     def __init__(self) -> None:
         self._glp_client_id = os.environ.get(

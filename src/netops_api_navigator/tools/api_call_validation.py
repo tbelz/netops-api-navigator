@@ -117,7 +117,7 @@ def validate_call(
             "checked against the schema."
         )
 
-    supplied_query = {str(name).lower() for name in (query_params or {})}
+    supplied_query = set((query_params or {}).keys())
     ignored_required_query_params = {
         str(name).lower() for name in (ignored_required_query_params or set())
     }
@@ -130,7 +130,7 @@ def validate_call(
         result.required_query_params.add(normalized_name)
         if normalized_name in ignored_required_query_params:
             continue
-        if normalized_name not in supplied_query:
+        if name not in supplied_query:
             result.errors.append(f"Missing required query parameter: {name!r}.")
 
     method_u = method.upper()

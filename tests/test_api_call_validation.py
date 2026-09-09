@@ -114,6 +114,22 @@ class TestRequiredQueryParams:
         assert result.ok
         assert result.required_query_params == {"scopeid"}
 
+    def test_wrong_case_required_query_param_blocks(self):
+        gm = _FakeGraph(
+            {
+                "required_params": [
+                    {"name": "scopeId", "location": "query"},
+                ]
+            }
+        )
+
+        result = validate_call(
+            gm, "GET", "/cfg/things", {"scopeid": "abc"}, None
+        )
+
+        assert not result.ok
+        assert any("scopeId" in error for error in result.errors)
+
     def test_required_path_param_ignored(self):
         # Required path params are validated by the server returning 404,
         # not by the pre-flight check.
