@@ -264,6 +264,31 @@ def test_auto_seed_reports_partial_success_when_summary_contains_errors(monkeypa
     assert runtime.seed_status["seed.py"]["summary"]["errors"] == ["GET failed"]
 
 
+def test_auto_seed_status_prepopulates_pending_jobs(monkeypatch):
+    import netops_api_navigator.server as server
+
+    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={})
+    observed: dict = {}
+    monkeypatch.setattr(
+        server,
+        "_get_auto_run_seeds",
+        lambda settings, allowed=None: ["first.py", "second.py"],
+    )
+
+    def _run(settings, script_name, ipc_env=None):
+        if script_name == "first.py":
+            observed.update(runtime.seed_status)
+        return json.dumps({"exit_code": 0, "stdout": "{}", "stderr": ""})
+
+    monkeypatch.setattr(server, "_run_script", _run)
+    monkeypatch.setattr(server, "_update_script_node", lambda *args: None)
+
+    server._run_auto_seeds(runtime, {})
+
+    assert observed["first.py"]["status"] == "running"
+    assert observed["second.py"]["status"] == "pending"
+
+
 def test_explicit_knowledge_pin_rejects_stale_local_cache(tmp_path):
     from netops_api_navigator.server import StartupError, _check_knowledge_pin
 

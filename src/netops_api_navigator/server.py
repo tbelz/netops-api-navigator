@@ -318,7 +318,15 @@ def _run_auto_seeds(
 ) -> None:
     import time
 
-    for script_name in _get_auto_run_seeds(runtime.settings, allowed_scripts):
+    script_names = _get_auto_run_seeds(runtime.settings, allowed_scripts)
+    queued_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for script_name in script_names:
+        runtime.seed_status[script_name] = {
+            "status": "pending",
+            "queued_at": queued_at,
+        }
+
+    for script_name in script_names:
         started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         runtime.seed_status[script_name] = {"status": "running", "started_at": started}
         try:

@@ -37,11 +37,18 @@ def register_status_tool(
         ``central_connected`` means OAuth token validation succeeded; Central
         still authorizes each API endpoint independently.
         """
-        jobs = seed_status() if seed_status is not None else {}
+        raw_jobs = seed_status() if seed_status is not None else {}
+        jobs = raw_jobs.copy() if isinstance(raw_jobs, dict) else {}
         job_states = {
             str(name): {
                 key: details[key]
-                for key in ("status", "exit_code", "started_at", "finished_at")
+                for key in (
+                    "status",
+                    "exit_code",
+                    "queued_at",
+                    "started_at",
+                    "finished_at",
+                )
                 if key in details
             }
             for name, details in jobs.items()
