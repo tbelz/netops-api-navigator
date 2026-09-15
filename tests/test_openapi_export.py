@@ -26,6 +26,7 @@ from netops_api_navigator.openapi_export import (
     merge,
     normalize,
     operation_keys,
+    prefer_stable_operations,
     resolve_pointer,
     validate_references,
 )
@@ -306,6 +307,116 @@ def test_pages_without_oas_are_accounted_for():
     check_health(report, {"MRT": 1, "Config": 1})
 
 
+def version_pair():
+    alpha_path = "/network-config/v1alpha1/sites"
+    stable_path = "/network-config/v1/sites"
+    alpha = spec(alpha_path)
+    alpha["paths"][alpha_path]["get"].update(
+        deprecated=True, description=f"Use {stable_path} instead."
+    )
+    stable = spec(stable_path, model={"type": "integer"})
+    return alpha, stable, alpha_path, stable_path
+
+
+def test_prefer_stable_preserves_successor_and_unreplaced_methods():
+    alpha, stable, old, new = version_pair()
+    alpha["paths"][old]["post"] = copy.deepcopy(alpha["paths"][old]["get"])
+    alpha["paths"][old]["post"]["operationId"] = "createAlpha"
+    document = merge([source("Config/old.json", alpha), source("Config/new.json", stable)], "API")
+    successor = copy.deepcopy(document["paths"][new])
+    replacements = prefer_stable_operations(document)
+    assert operation_keys(document) == {("get", new), ("post", old)}
+    assert document["paths"][new] == successor
+    assert response_schema(document, new) == {"type": "integer"}
+    assert replacements == [
+        {
+            "method": "get",
+            "alpha_path": old,
+            "stable_path": new,
+            "alpha_operation_id": old.strip("/"),
+            "stable_operation_id": new.strip("/"),
+            "alpha_source": "Config/old.json",
+            "stable_source": "Config/new.json",
+        }
+    ]
+    validate_references(document)
+    validate(document)
+
+
+@pytest.mark.parametrize(
+    "uncertain",
+    [
+        "not_deprecated",
+        "deprecated_successor",
+        "description",
+        "different_server",
+        "different_area",
+        "different_major",
+    ],
+)
+def test_alpha_is_retained_without_an_unambiguous_stable_successor(uncertain):
+    alpha, stable, old, new = version_pair()
+    area = "Config"
+    if uncertain == "not_deprecated":
+        alpha["paths"][old]["get"].pop("deprecated")
+    elif uncertain == "deprecated_successor":
+        stable["paths"][new]["get"]["deprecated"] = True
+    elif uncertain == "description":
+        alpha["paths"][old]["get"]["description"] = f"Use {new}-other instead."
+    elif uncertain == "different_server":
+        stable["servers"] = [{"url": "https://other.example.test"}]
+    elif uncertain == "different_area":
+        area = "MRT"
+    elif uncertain == "different_major":
+        stable["paths"] = {new.replace("/v1/", "/v2/"): stable["paths"].pop(new)}
+    document = merge([source("Config/old.json", alpha), source(f"{area}/new.json", stable)], "API")
+    before = operation_keys(document)
+    assert prefer_stable_operations(document) == []
+    assert operation_keys(document) == before
+
+
+@pytest.mark.parametrize("reference_kind", ["operationId", "operationRef"])
+def test_links_to_removed_operations_block_export(reference_kind):
+    alpha, stable, old, new = version_pair()
+    document = merge([source("Config/old.json", alpha), source("Config/new.json", stable)], "API")
+    target = (
+        old.strip("/")
+        if reference_kind == "operationId"
+        else "#/paths/" + old.replace("/", "~1") + "/get"
+    )
+    document["paths"][new]["get"]["responses"]["200"]["links"] = {
+        "previous": {reference_kind: target}
+    }
+    with pytest.raises(ExportError):
+        prefer_stable_operations(document)
+        validate_references(document)
+
+
+def test_export_reports_every_replacement_and_still_validates_excluded_sources(tmp_path):
+    cache = write_inputs(tmp_path)
+    alpha, stable, old, new = version_pair()
+    (cache / "Config" / "get.json").write_text(canonical(alpha))
+    (cache / "Config" / "stable.json").write_text(canonical(stable))
+    health = manifest({"MRT": 1, "Config": 2})
+    files, report = build_exports(cache, health)
+    repeated, _ = build_exports(cache, health, workflow_url="another-day")
+    combined = json.loads(files["central-openapi.json"])
+    assert old not in combined["paths"]
+    for name, details in report["outputs"].items():
+        assert files[name] == repeated[name]
+        assert details["source_operations"] == details["operations"] + len(details["replacements"])
+        assert details["superseded_alpha_operations"] == (0 if "monitoring" in name else 1)
+    assert report["source_count"] == 3
+    assert (
+        report["outputs"]["central-openapi.json"]["replacements"]
+        == report["outputs"]["central-config-openapi.json"]["replacements"]
+    )
+    alpha["paths"][old]["get"]["responses"] = "invalid source"
+    (cache / "Config" / "get.json").write_text(canonical(alpha))
+    with pytest.raises(ExportError):
+        build_exports(cache, health)
+
+
 def test_export_sets_are_deterministic_complete_and_checksummed(tmp_path):
     cache = write_inputs(tmp_path)
     files, report = build_exports(cache, manifest())
@@ -408,5 +519,11 @@ def test_complete_central_corpus_has_no_lost_operations(real_central_specs):
     expected = set()
     for path in real_central_specs:
         expected.update(operation_keys(json.loads(path.read_text())))
-    assert operation_keys(json.loads(files["central-openapi.json"])) == expected
+    replacements = report["outputs"]["central-openapi.json"]["replacements"]
+    removed = {(r["method"], r["alpha_path"]) for r in replacements}
+    actual = operation_keys(json.loads(files["central-openapi.json"]))
+    assert actual == expected - removed
+    assert all((r["method"], r["stable_path"]) in actual for r in replacements)
+    assert replacements == report["outputs"]["central-config-openapi.json"]["replacements"]
+    assert report["outputs"]["central-monitoring-openapi.json"]["replacements"] == []
     assert report["source_count"] == len(real_central_specs)

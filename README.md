@@ -245,7 +245,7 @@ files. Download a file or enter its stable URL into an OpenAPI 3.1-compatible to
 
 | Export | Current URL |
 |---|---|
-| Complete Central API | [central-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-openapi.json) |
+| Combined Central API | [central-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-openapi.json) |
 | Monitoring, reporting, troubleshooting and token generation | [central-monitoring-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-monitoring-openapi.json) |
 | Configuration | [central-config-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-config-openapi.json) |
 | Scrape date, corrections, validation and checksums | [export-report.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/export-report.json) |
@@ -255,10 +255,17 @@ The exporter corrects unambiguous source formatting errors and keeps conflicting
 models separate. Source descriptions and provenance are retained on operations.
 These files contain Central APIs; GreenLake is not included.
 
+Non-deprecated stable APIs are preferred over their explicitly superseded alpha
+counterparts. The exporter removes an alpha operation only when its deprecation
+notice names an available stable successor with the same method, resource and
+servers. Other alpha APIs remain included. The report records every replacement;
+the original schemas remain in the raw archive.
+
 The workflow runs daily at 04:00 UTC (actual start times may be later).
 `scraped_at` in the report identifies the source data, while `info.version` is a
-content fingerprint, not the upstream API's version. A new valid publication
-updates all files together. If scraping, validation or export fails, the current
+content fingerprint, not the upstream API's version. The scrape date does not
+guarantee that HPE's documentation matches the newest product release. A new valid
+publication updates all files together. If scraping, validation or export fails, the current
 URLs retain the last successful publication: check the report's date for freshness.
 
 Immutable snapshots appear as `openapi-*` entries in

@@ -5,7 +5,7 @@
 The current publication lives at
 `https://tbelz.github.io/netops-api-navigator/openapi/latest/`:
 
-- `central-openapi.json`: all available Central source operations.
+- `central-openapi.json`: combined Central API, preferring confirmed stable successors.
 - `central-monitoring-openapi.json`: the MRT source, including token generation.
 - `central-config-openapi.json`: the Config source.
 - `export-report.json`: source timestamp and health, file provenance, correction
@@ -21,8 +21,32 @@ The three definitions are self-contained; internal `$ref`s are retained, includi
 cycles. This avoids expanding repeated or recursive data models. The two area
 exports partition the operations in the combined export. Output order and schema
 bytes are deterministic for identical source inputs and exporter behavior.
-`info.version` fingerprints source inputs; it is not an upstream API version.
+`info.version` fingerprints source inputs and the selection policy; it is not an
+upstream API version.
 Original document metadata is available in each operation's `x-source-document`.
+
+## Stable API preference
+
+Exports omit a deprecated alpha operation only when all of these checks pass:
+
+- The same scrape contains a non-deprecated stable operation with the same HTTP
+  method and resource path, changing only a version segment such as `v1alpha1` to `v1`.
+- Both operations belong to the same Central source area and use the same servers.
+- The alpha description explicitly says to use that stable path instead.
+
+The stable definition is preserved unchanged, including its own parameters,
+authentication, examples and responses. Paths are never upgraded by renaming.
+Alpha operations without a confirmed successor remain available. Renamed resources,
+different major versions and ambiguous replacements are retained for explicit review.
+
+The report lists `selection_policy` and, for each output, `source_operations`,
+`superseded_alpha_operations` and `replacements` with both source files, paths and
+operation IDs. Every input is validated before this selection, including replaced
+alpha inputs. Output coverage must equal input coverage minus exactly those recorded
+replacements. A retained reference or link to a removed operation blocks publication.
+
+The scrape date describes when HPE's public documentation was retrieved. It does
+not certify that those upstream documents reflect the latest product release.
 
 ## Transformation boundary
 
@@ -47,7 +71,8 @@ modified. The exporter:
    distinct, even when their security-scheme bodies match.
 5. Preserves effective operation servers, security and parameter overrides.
    Generates a deterministic operation ID only when the source omitted one.
-6. Checks all local references, exact operation coverage and OpenAPI validity
+6. Selects confirmed stable successors using the policy above, then checks all local
+   references, operation coverage after recorded replacements and OpenAPI validity
    before writing any candidate publication.
 
 Unknown reference scopes, external references, ambiguous discriminators,
