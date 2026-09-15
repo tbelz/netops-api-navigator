@@ -5,6 +5,10 @@ on:
     - cron: "0 4 * * *"   # Daily at 04:00 UTC
   workflow_dispatch:        # Manual trigger
 
+concurrency:
+  group: knowledge-db-sync-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write          # Needed for creating releases
   issues: write            # Needed for knowledge-sync alert issues
@@ -125,6 +129,16 @@ jobs:
           tar czf build/central-spec-cache.tar.gz -C build/spec_cache central
           COUNT=$(find build/spec_cache/central -name '*.json' | wc -l)
           echo "Packed Central spec cache: ${COUNT} spec files, $(stat -c%s build/central-spec-cache.tar.gz) bytes"
+
+      - name: Pass this scrape to the OpenAPI exporter
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-openapi-input
+          path: |
+            build/central-spec-cache.tar.gz
+            build/manifest.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Ensure alert label exists
         env:
@@ -319,3 +333,111 @@ jobs:
           make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  export-openapi:
+    needs: build-knowledge-db
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install exporter dependencies
+        run: uv sync --frozen --no-dev --extra compiler
+      - uses: actions/download-artifact@v4
+        with:
+          name: central-openapi-input
+          path: build/input
+      - name: Unpack this run's Central cache
+        run: tar xzf build/input/central-spec-cache.tar.gz -C build/input
+      - name: Build and validate all three exports
+        env:
+          SOURCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: >
+          uv run --no-sync python scripts/build_openapi_export.py
+          --cache-dir build/input/central
+          --manifest build/input/manifest.json
+          --output-dir build/openapi
+          --diagnostics build/openapi-diagnostics.json
+          --workflow-url "$SOURCE_RUN_URL"
+          --source-commit "$SOURCE_COMMIT"
+      - name: Retain export diagnostics, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-openapi-diagnostics
+          path: build/openapi-diagnostics.json
+          retention-days: 14
+      - name: Upload the complete validated export
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-openapi-export
+          path: build/openapi/*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-openapi:
+    needs: export-openapi
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: central-openapi-export
+          path: build/pages/openapi/latest
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Package the entire publication together
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: build/pages
+      - name: Generate immutable snapshot tag
+        id: snapshot
+        run: |
+          SCRAPE_DATE=$(jq -r '.scraped_at[0:10] | gsub("-"; "")' build/pages/openapi/latest/export-report.json)
+          echo "tag=openapi-${SCRAPE_DATE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - name: Publish dated OpenAPI snapshot
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.snapshot.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Central OpenAPI ${{ steps.snapshot.outputs.tag }}
+          body: |
+            Validated, self-contained OpenAPI 3.1.0 JSON exports of the Central API documentation.
+            Includes the full API, monitoring and configuration subsets, and a provenance/validation report.
+            The stable current URLs are documented in the repository README.
+          files: build/pages/openapi/latest/*.json
+          fail_on_unmatched_files: true
+          prerelease: false
+          make_latest: false
+      - name: Publish the validated current snapshot
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Verify public JSON, checksums and browser access
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+        run: >
+          uv run --no-project python scripts/verify_openapi_publication.py
+          --base-url "${PAGES_URL%/}/openapi/latest/"
+          --report build/pages/openapi/latest/export-report.json

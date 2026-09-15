@@ -238,6 +238,37 @@ No Central credentials are configured. The server exposes the knowledge graph,
 documentation resources, `write_graph`, and script CRUD tools. It does not
 register `call_central_api`, `call_greenlake_api`, or `execute_script`.
 
+### OpenAPI files for explorers and API tools
+
+The daily scrape also publishes validated, self-contained **OpenAPI 3.1.0 JSON**
+files. Download a file or enter its stable URL into an OpenAPI 3.1-compatible tool:
+
+| Export | Current URL |
+|---|---|
+| Complete Central API | [central-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-openapi.json) |
+| Monitoring, reporting, troubleshooting and token generation | [central-monitoring-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-monitoring-openapi.json) |
+| Configuration | [central-config-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-config-openapi.json) |
+| Scrape date, corrections, validation and checksums | [export-report.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/export-report.json) |
+
+All references needed to interpret each API definition are inside that file.
+The exporter corrects unambiguous source formatting errors and keeps conflicting
+models separate. Source descriptions and provenance are retained on operations.
+These files contain Central APIs; GreenLake is not included.
+
+The workflow runs daily at 04:00 UTC (actual start times may be later).
+`scraped_at` in the report identifies the source data, while `info.version` is a
+content fingerprint, not the upstream API's version. A new valid publication
+updates all files together. If scraping, validation or export fails, the current
+URLs retain the last successful publication: check the report's date for freshness.
+
+Immutable snapshots appear as `openapi-*` entries in
+[GitHub Releases](https://github.com/tbelz/netops-api-navigator/releases).
+The existing `knowledge-db-*` releases and their `central-spec-cache.tar.gz`
+raw-data archives remain available. The raw archive is not an explorer import file.
+
+See [OpenAPI export development and publication](docs/openapi-export.md) for
+local verification, the transformation policy and publication setup.
+
 ### Connected
 
 Central credentials are configured and validated during startup. The server
