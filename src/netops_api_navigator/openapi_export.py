@@ -24,6 +24,7 @@ FILES = {
     "central-monitoring-openapi.json": "MRT",
     "central-config-openapi.json": "Config",
 }
+SELECTION_POLICY = "prefer_documented_stable_successors_v1"
 COMPONENT_KINDS = {
     "schemas": "schema",
     "responses": "response",
@@ -545,6 +546,68 @@ def merge(sources: list[Source], title: str) -> dict:
     return output
 
 
+def prefer_stable_operations(document: dict) -> list[dict]:
+    """Remove only deprecated alpha operations with an explicit stable successor.
+
+    Match the same method, resource, major version, source area and servers.
+    The source description must name that successor. Keep the stable operation
+    intact: its parameters and models can legitimately differ from the alpha API.
+    """
+    before = operation_keys(document)
+    replacements = []
+    for method, path in sorted(before):
+        stable_path, count = re.subn(r"/(v\d+)alpha\d+(?=/)", r"/\1", path)
+        if count != 1:
+            continue
+        alpha = document["paths"][path][method]
+        stable = document["paths"].get(stable_path, {}).get(method)
+        if not alpha.get("deprecated") or not stable or stable.get("deprecated"):
+            continue
+        source = alpha["x-source-document"]["file"]
+        successor_source = stable["x-source-document"]["file"]
+        if source.split("/")[0] != successor_source.split("/")[0]:
+            continue
+        if alpha["servers"] != stable["servers"]:
+            continue
+        if not re.search(
+            r"\bUse\s+`?" + re.escape(stable_path) + r"`?\s+instead\b",
+            alpha.get("description", ""),
+            re.IGNORECASE,
+        ):
+            continue
+        replacements.append(
+            {
+                "method": method,
+                "alpha_path": path,
+                "stable_path": stable_path,
+                "alpha_operation_id": alpha["operationId"],
+                "stable_operation_id": stable["operationId"],
+                "alpha_source": source,
+                "stable_source": successor_source,
+            }
+        )
+    for replacement in replacements:
+        path = replacement["alpha_path"]
+        del document["paths"][path][replacement["method"]]
+        if not METHODS.intersection(document["paths"][path]):
+            del document["paths"][path]
+    removed_ids = {r["alpha_operation_id"] for r in replacements}
+    for node, kind, _ in walk(document):
+        if kind == "link" and node.get("operationId") in removed_ids:
+            raise ExportError("A retained OpenAPI link targets a superseded alpha operation")
+    removed = {(r["method"], r["alpha_path"]) for r in replacements}
+    if operation_keys(document) != before - removed:
+        raise ExportError("Operation coverage changed beyond documented alpha replacements")
+    document["info"]["version"] = digest(
+        {"sources": document["info"]["version"], "selection_policy": SELECTION_POLICY}
+    )[:16]
+    document["info"]["description"] += (
+        " Deprecated alpha operations are omitted when the source explicitly identifies "
+        "a matching non-deprecated stable successor. Other alpha operations remain included."
+    )
+    return replacements
+
+
 def build_exports(
     cache_dir: Path, manifest: dict, *, workflow_url: str = "", source_commit: str = ""
 ) -> tuple[dict[str, bytes], dict]:
@@ -565,6 +628,7 @@ def build_exports(
             for s in sources
         ],
         "corrections": changes,
+        "selection_policy": SELECTION_POLICY,
         "outputs": {},
     }
     files = {}
@@ -574,6 +638,8 @@ def build_exports(
         title = "HPE Aruba Networking Central" + (f" — {AREAS[area].title()}" if area else "")
         print(f"Merging and validating {filename} ({len(selected)} sources)", flush=True)
         document = merge(selected, title)
+        source_operations = len(operation_keys(document))
+        replacements = prefer_stable_operations(document)
         refs = validate_references(document)
         validate(document)
         keys_by_output[filename] = operation_keys(document)
@@ -586,6 +652,9 @@ def build_exports(
             "references": refs,
             "validation": "passed",
             "source_count": len(selected),
+            "source_operations": source_operations,
+            "superseded_alpha_operations": len(replacements),
+            "replacements": replacements,
         }
     if (
         keys_by_output["central-monitoring-openapi.json"]
