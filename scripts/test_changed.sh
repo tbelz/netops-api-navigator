@@ -74,6 +74,9 @@ while IFS= read -r f; do
             add_tests "tests/test_api_tree.py"
             add_tests "tests/test_endpoint_catalog_resource.py"
             ;;
+        src/netops_api_navigator/openapi_export.py | scripts/build_openapi_export.py | scripts/verify_openapi_publication.py)
+            add_tests "tests/test_openapi_export.py"
+            ;;
         src/netops_api_navigator/knowledge_db.py)
             add_tests "tests/test_knowledge_db.py"
             ;;
