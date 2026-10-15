@@ -173,7 +173,7 @@ jobs:
           ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)
           WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
           mkdir -p tmp
-          uv run --no-project --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --with "$WHEEL" python scripts/smoke_ladybug_extensions.py --directory tmp/extension-smoke
+          uv run --no-project --python 3.12 --no-build --with-requirements "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --with "$WHEEL" python scripts/smoke_ladybug_extensions.py --directory tmp/extension-smoke
 
   publish-testpypi:
     if: startsWith(github.ref, 'refs/tags/v')

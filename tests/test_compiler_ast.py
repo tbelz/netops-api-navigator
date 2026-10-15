@@ -521,8 +521,8 @@ def test_writer_persists_ast_graph_to_ladybug() -> None:
                     """
                     MATCH (root:OasAstNode)-[edge:AST_CHILD]->(child:OasAstNode)
                     WHERE root.kind = 'Document' AND child.key = 'info'
-                    RETURN edge.key AS edge_key, edge.index AS edge_index,
-                           child.key AS child_key, child.index AS child_index
+                    RETURN edge.key AS edge_key, edge.`index` AS edge_index,
+                           child.key AS child_key, child.`index` AS child_index
                     """
                 ).rows_as_dict()
             )

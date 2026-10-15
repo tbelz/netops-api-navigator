@@ -22,6 +22,8 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.parametrize(('message', 'expected'), [
     ('Runtime exception: Corrupted wal file. Read out invalid WAL record type.', True),
+    ('Runtime exception: Unable to open database. '
+     'The file is not a valid Lbug database file!', True),
     ('IO exception: Cannot read from file: graph fileDescriptor: 7 '
      'numBytesRead: 0 numBytesToRead: 4096 position: 4901969379328', True),
     ('IO exception: Cannot read from file: graph numBytesRead: 128 numBytesToRead: 4096', True),
