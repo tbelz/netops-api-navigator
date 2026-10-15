@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -25,6 +27,7 @@ def _run_script(
     parameters: dict[str, str] | None = None,
     *,
     ipc_env: dict[str, str] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> str:
     """Execute a script from the library and return JSON result.
 
@@ -64,11 +67,9 @@ def _run_script(
     logger.info("script_execution_start", filename=filename, parameters=parameters)
 
     try:
-        result = subprocess.run(
+        result = _run_cancellable(
             cmd,
-            capture_output=True,
-            text=True,
-            timeout=EXECUTION_TIMEOUT,
+            stop_event=stop_event,
             cwd=str(lib),
             env=env,
         )
@@ -103,6 +104,72 @@ def _run_script(
     except Exception as e:
         logger.error("script_execution_error", filename=filename, error=str(e))
         return json.dumps({"error": f"Execution failed: {str(e)}"})
+
+
+def _run_cancellable(cmd, *, cwd, env, stop_event):
+    """Drain both pipes while polling cancellation; always reap the child."""
+    if stop_event is None:
+        return subprocess.run(
+            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=EXECUTION_TIMEOUT
+        )
+    if stop_event.is_set():
+        return subprocess.CompletedProcess(cmd, -1, "", "Server shutting down")
+    deadline = time.monotonic() + EXECUTION_TIMEOUT
+    process = subprocess.Popen(
+        cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=os.name != "nt",
+    )
+    try:
+        while True:
+            if stop_event.is_set():
+                stdout, stderr = _terminate_script_tree(process)
+                return subprocess.CompletedProcess(cmd, -1, stdout, stderr)
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(cmd, EXECUTION_TIMEOUT)
+            try:
+                stdout, stderr = process.communicate(timeout=0.1)
+                return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                pass
+    finally:
+        if process.returncode is None:
+            _terminate_script_tree(process)
+
+
+def _terminate_script_tree(process: subprocess.Popen) -> tuple[str, str]:
+    """Kill owned script descendants and reap without waiting forever on pipes.
+
+    Scripts access the graph through IPC, so stopping them prevents new requests;
+    the IPC server still drains any native query already executing in the server.
+    """
+    if os.name == "nt":
+        # taskkill /T handles descendants before terminating the root process.
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if process.poll() is None:
+            process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        return process.communicate(timeout=1)
+    except subprocess.TimeoutExpired:
+        # A detached descendant can escape the process tree yet retain a pipe.
+        # It must not prevent graph shutdown. On Windows communicate uses daemon
+        # reader threads: closing their streams here can itself block on a read
+        # lock, so let those readers release the streams when the peer exits.
+        process.wait(timeout=1)
+        if os.name != "nt":
+            process.stdout.close()
+            process.stderr.close()
+        return "", "Script cancelled; a descendant retained an output pipe."
 
 
 def _build_env(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -194,11 +195,17 @@ def test_connected_workshop_starts_only_trusted_background_seeds(monkeypatch, tm
     captured: dict = {}
 
     class _CapturedThread:
+        ident = None
+
         def __init__(self, *, target, args, name, daemon):
             captured.update(target=target, args=args, name=name, daemon=daemon)
 
         def start(self):
+            self.ident = 1
             captured["started"] = True
+
+        def join(self):
+            captured["joined"] = True
 
     class _FakeIPCServer:
         def __init__(self, graph_manager):
@@ -243,12 +250,12 @@ def test_connected_workshop_starts_only_trusted_background_seeds(monkeypatch, tm
 def test_auto_seed_reports_partial_success_when_summary_contains_errors(monkeypatch):
     import netops_api_navigator.server as server
 
-    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={})
+    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={}, stop_event=threading.Event())
     monkeypatch.setattr(server, "_get_auto_run_seeds", lambda settings, allowed=None: ["seed.py"])
     monkeypatch.setattr(
         server,
         "_run_script",
-        lambda settings, script_name, ipc_env=None: json.dumps(
+        lambda settings, script_name, ipc_env=None, stop_event=None: json.dumps(
             {
                 "exit_code": 0,
                 "stdout": json.dumps({"items": 0, "errors": ["GET failed"]}),
@@ -267,12 +274,12 @@ def test_auto_seed_reports_partial_success_when_summary_contains_errors(monkeypa
 def test_auto_seed_reports_partial_success_when_stderr_contains_warning(monkeypatch):
     import netops_api_navigator.server as server
 
-    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={})
+    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={}, stop_event=threading.Event())
     monkeypatch.setattr(server, "_get_auto_run_seeds", lambda settings, allowed=None: ["seed.py"])
     monkeypatch.setattr(
         server,
         "_run_script",
-        lambda settings, script_name, ipc_env=None: json.dumps(
+        lambda settings, script_name, ipc_env=None, stop_event=None: json.dumps(
             {
                 "exit_code": 0,
                 "stdout": json.dumps({"sites_processed": 1, "errors": []}),
@@ -294,7 +301,7 @@ def test_auto_seed_reports_partial_success_when_stderr_contains_warning(monkeypa
 def test_auto_seed_status_prepopulates_pending_jobs(monkeypatch):
     import netops_api_navigator.server as server
 
-    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={})
+    runtime = SimpleNamespace(settings=object(), graph_manager=object(), seed_status={}, stop_event=threading.Event())
     observed: dict = {}
     monkeypatch.setattr(
         server,
@@ -302,7 +309,7 @@ def test_auto_seed_status_prepopulates_pending_jobs(monkeypatch):
         lambda settings, allowed=None: ["first.py", "second.py"],
     )
 
-    def _run(settings, script_name, ipc_env=None):
+    def _run(settings, script_name, ipc_env=None, stop_event=None):
         if script_name == "first.py":
             observed.update(runtime.seed_status)
         return json.dumps({"exit_code": 0, "stdout": "{}", "stderr": ""})

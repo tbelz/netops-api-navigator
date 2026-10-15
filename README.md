@@ -221,10 +221,10 @@ sent to the wrong Central cluster can still be rejected with HTTP 403.
 | `SCRIPT_LIBRARY_PATH` | No | per-user application data | Script library path |
 | `INVENTORY_CACHE_TTL` | No | `300` | Runtime inventory cache TTL in seconds |
 
-Native and Docker starts download the newest Knowledge DB release automatically.
+Native and Docker starts download the newest Knowledge DB release automatically
+when the runtime graph does not yet exist. Existing runtime graphs are reused.
 Set `KNOWLEDGE_RELEASE_TAG` for an immutable workshop snapshot. Downloads use
-the SHA-256 digest reported by GitHub and are staged before replacing the local
-database.
+the SHA-256 digest reported by GitHub and are staged before installation.
 
 Partial Central credentials are treated as a configuration error. Provide all of
 `CENTRAL_BASE_URL`, `CENTRAL_CLIENT_ID`, and `CENTRAL_CLIENT_SECRET` for
@@ -441,15 +441,28 @@ next-step hints.
 ## Knowledge DB Startup
 
 When `KNOWLEDGE_RELEASE_REPO` is set, the server downloads the latest released
-knowledge artifact before opening the graph. `MCP_KNOWLEDGE_PROJECTION=legacy`
+knowledge artifact before opening a new graph. Existing runtime graphs are not
+automatically refreshed, because they also contain local state. `MCP_KNOWLEDGE_PROJECTION=legacy`
 uses `knowledge_db.tar.gz`; `v2` or `compiler` uses
 `knowledge_db_compiler.tar.gz`.
 
 The local manifest records the release tag, selected artifact, archive member,
 and projection so the server does not confuse same-release legacy and v2
 installs. If GitHub is unavailable but a local DB exists, startup keeps using
-the local copy. If a persisted graph fails to open with recoverable Ladybug/WAL
-errors, startup forces one fresh download and retries.
+the local copy. WAL corruption and short page reads stop startup with a diagnostic;
+the server never deletes the database or its sidecars to hide the error.
+
+For an explicit restore or knowledge upgrade, stop every process using the graph,
+preserve the entire graph directory (including `.wal`, `.shadow`, and `manifest.json`),
+and select a new empty `GRAPH_DB_PATH` in a separate directory. The next start installs
+a verified snapshot there. This restores knowledge only; local graph changes must be
+recreated or recovered separately. Do not remove only the WAL or mix an old WAL with
+a replacement database.
+
+On STDIO EOF or SIGTERM, the server cancels automatic seed scripts, drains graph IPC
+requests, and releases the database. Native statements already executing must finish
+before close; SIGKILL or a client grace period shorter than that work can still prevent
+cleanup. See [the restart investigation](docs/graph-restart-investigation.md).
 
 ## Development
 

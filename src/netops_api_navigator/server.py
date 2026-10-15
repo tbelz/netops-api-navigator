@@ -7,7 +7,9 @@ import graphlib
 import json
 import os
 import platform
+import re
 import shutil
+import signal
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -24,7 +26,7 @@ from .config import Settings, load_settings
 from .graph import GraphManager
 from .graph.ipc_server import GraphIPCServer
 from .instructions import build_instructions
-from .knowledge_db import download_knowledge_db
+from .knowledge_db import _local_install_matches, download_knowledge_db
 from .logging import setup_logging
 from .prompts.workflows import register_prompts
 from .resources.docs import register_api_catalog_resource, register_resources
@@ -64,8 +66,16 @@ class ServerRuntime:
     knowledge_downloaded: bool
     ipc_server: GraphIPCServer | None = None
     seed_status: dict[str, dict] = field(default_factory=dict)
+    seed_thread: threading.Thread | None = None
+    stop_event: threading.Event = field(default_factory=threading.Event)
 
     def close(self) -> None:
+        # Stop admitting seed jobs, cancel the active subprocess, then drain IPC.
+        self.stop_event.set()
+        if self.seed_thread is not None:
+            if self.seed_thread.ident is not None:
+                self.seed_thread.join()
+            self.seed_thread = None
         if self.ipc_server is not None:
             self.ipc_server.stop()
             self.ipc_server = None
@@ -160,45 +170,45 @@ def _download_runtime_knowledge_db(settings: Settings, *, force: bool = False) -
     )
 
 
-def _is_recoverable_runtime_db_open_error(exc: BaseException) -> bool:
+def _is_runtime_db_corruption_error(exc: BaseException) -> bool:
     if not isinstance(exc, (RuntimeError, OSError)):
         return False
     msg = str(exc).lower()
-    return any(
-        marker in msg
-        for marker in (
-            "corrupt",
-            ".wal",
-            "wal file",
-            "invalid wal",
-            "not a database",
-            "reading past the end",
-        )
+    # File names alone (especially .wal) also appear in permission/lock errors.
+    if any(marker in msg for marker in (
+        "permission denied", "access denied", "could not set lock", "resource busy",
+        "resource temporarily unavailable", "input/output error",
+    )):
+        return False
+    if any(marker in msg for marker in (
+        "corrupted wal file", "invalid wal record", "not a database", "reading past the end",
+    )):
+        return True
+    short_read = re.search(r"numbytesread:\s*(\d+)\s+numbytestoread:\s*(\d+)", msg)
+    return bool(
+        "cannot read from file:" in msg
+        and short_read
+        and int(short_read[1]) < int(short_read[2])
     )
 
 
-def _initialize_runtime_graph(settings: Settings) -> tuple[GraphManager, bool]:
+def _initialize_runtime_graph(settings: Settings) -> GraphManager:
     manager = GraphManager(settings.graph_db_path)
     try:
         manager.initialize()
-        return manager, False
-    except Exception as exc:
-        if (
-            not settings.knowledge_release_repo
-            or not settings.graph_db_path.exists()
-            or not _is_recoverable_runtime_db_open_error(exc)
-        ):
+        return manager
+    except BaseException as exc:
+        manager.close()
+        if not _is_runtime_db_corruption_error(exc):
             raise
-        logger.warning(
-            "knowledge_db_open_failed_reinstalling",
-            db_path=str(settings.graph_db_path),
-            error=str(exc),
-        )
-        if not _download_runtime_knowledge_db(settings, force=True):
-            raise StartupError("Could not reinstall an unreadable knowledge database") from exc
-        recovered = GraphManager(settings.graph_db_path)
-        recovered.initialize()
-        return recovered, True
+        # A runtime graph contains local topology and user-authored scripts, not
+        # just a disposable knowledge cache. Never replace it during startup.
+        raise StartupError(
+            f"Persisted graph is unreadable: {settings.graph_db_path}. Ladybug error: {exc}. "
+            "Database and sidecars have been preserved. Stop all graph owners and "
+            "back up the database, WAL, shadow file and manifest before an explicit "
+            "restore from a verified knowledge snapshot; restoring loses local graph changes."
+        ) from exc
 
 
 def _check_knowledge_schema_version(settings: Settings) -> None:
@@ -220,15 +230,28 @@ def _check_knowledge_schema_version(settings: Settings) -> None:
 
 def _check_knowledge_pin(settings: Settings) -> None:
     """Refuse an existing cache that does not match an explicit workshop pin."""
-    if not settings.knowledge_release_tag and not settings.knowledge_asset_sha256:
-        return
     manifest_path = settings.graph_db_path.parent / "manifest.json"
+    if (
+        not manifest_path.exists()
+        and not settings.knowledge_release_tag
+        and not settings.knowledge_asset_sha256
+    ):
+        return
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise StartupError(
             "The installed Knowledge DB has no readable manifest for the requested pin."
         ) from exc
+    asset, member = _knowledge_artifact(settings)
+    if not _local_install_matches(
+        manifest, asset_name=asset, archive_member=member,
+        projection=settings.knowledge_projection,
+    ):
+        raise StartupError(
+            "The existing runtime graph does not match MCP_KNOWLEDGE_PROJECTION. "
+            "Use a separate GRAPH_DB_PATH directory for the requested artifact."
+        )
     if (
         settings.knowledge_release_tag
         and manifest.get("release_tag") != settings.knowledge_release_tag
@@ -327,17 +350,24 @@ def _run_auto_seeds(
         }
 
     for script_name in script_names:
+        if runtime.stop_event.is_set():
+            runtime.seed_status[script_name] = {"status": "cancelled"}
+            continue
         started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         runtime.seed_status[script_name] = {"status": "running", "started_at": started}
         try:
             result = json.loads(
-                _run_script(runtime.settings, script_name, ipc_env=ipc_env)
+                _run_script(
+                    runtime.settings, script_name, ipc_env=ipc_env,
+                    stop_event=runtime.stop_event,
+                )
             )
             exit_code = result.get("exit_code", -1)
             finished = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             _update_script_node(runtime.graph_manager, script_name, finished, exit_code)
             entry = {
-                "status": "success" if exit_code == 0 else "failed",
+                "status": ("cancelled" if runtime.stop_event.is_set()
+                           else "success" if exit_code == 0 else "failed"),
                 "exit_code": exit_code,
                 "started_at": started,
                 "finished_at": finished,
@@ -419,15 +449,19 @@ def create_server(
     graph_manager: GraphManager | None = None
     runtime: ServerRuntime | None = None
     try:
-        knowledge_downloaded = _download_runtime_knowledge_db(settings)
+        # An existing runtime DB owns local state. Updating/recovering it must
+        # be explicit, and must never replace a file another process has open.
+        knowledge_downloaded = (
+            _download_runtime_knowledge_db(settings)
+            if not settings.graph_db_path.exists() else False
+        )
         if settings.knowledge_release_repo and not settings.graph_db_path.exists():
             raise StartupError(
                 "Knowledge database is unavailable and no verified local cache exists."
             )
         _check_knowledge_pin(settings)
         _download_compiler_artifacts(settings)
-        graph_manager, recovered = _initialize_runtime_graph(settings)
-        knowledge_downloaded = knowledge_downloaded or recovered
+        graph_manager = _initialize_runtime_graph(settings)
         graph_manager.create_fts_indexes()
         _check_knowledge_schema_version(settings)
 
@@ -481,12 +515,13 @@ def create_server(
             register_api_catalog_resource(mcp, settings, graph_manager)
             register_graph_resources(mcp, graph_manager, lambda: runtime.seed_status)
             if ipc_env is not None:
-                threading.Thread(
+                runtime.seed_thread = threading.Thread(
                     target=_run_auto_seeds,
                     args=(runtime, ipc_env, _WORKSHOP_AUTO_RUN_SEEDS),
                     name="netops-api-navigator-workshop-seeds",
                     daemon=True,
-                ).start()
+                )
+                runtime.seed_thread.start()
         else:
             _prepare_script_library(settings, graph_manager)
             ipc_env: dict[str, str] | None = None
@@ -529,12 +564,13 @@ def create_server(
             register_graph_resources(mcp, graph_manager, lambda: runtime.seed_status)
             register_prompts(mcp, graph_manager)
             if client is not None and start_background and ipc_env is not None:
-                threading.Thread(
+                runtime.seed_thread = threading.Thread(
                     target=_run_auto_seeds,
                     args=(runtime, ipc_env),
                     name="netops-api-navigator-auto-seeds",
                     daemon=True,
-                ).start()
+                )
+                runtime.seed_thread.start()
 
         logger.info(
             "server_ready",
@@ -545,7 +581,7 @@ def create_server(
             read_only=settings.read_only,
         )
         return runtime
-    except Exception:
+    except BaseException:
         if runtime is not None:
             runtime.close()
         else:
@@ -666,16 +702,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_doctor(settings, skip_credentials=args.skip_credentials)
 
     runtime: ServerRuntime | None = None
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    terminating = False
+    serving = False
+
+    def terminate(signum, frame):
+        nonlocal terminating
+        if not terminating:
+            terminating = True
+            # Do not interrupt factory ownership transfer or Thread.start().
+            # Finish startup, then close without entering the transport loop.
+            if serving:
+                raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, terminate)
     try:
         runtime = create_server(settings)
+        serving = True
+        if terminating:
+            return 128 + signal.SIGTERM
         runtime.mcp.run(transport="stdio")
         return 0
     except StartupError as exc:
         logger.error("startup_failed", error=str(exc))
         return 1
     finally:
-        if runtime is not None:
-            runtime.close()
+        terminating = True
+        try:
+            if runtime is not None:
+                runtime.close()
+        finally:
+            signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 if __name__ == "__main__":
