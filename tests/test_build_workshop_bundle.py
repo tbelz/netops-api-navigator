@@ -9,6 +9,11 @@ from scripts.build_workshop_bundle import build_bundle
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def bundle_version(monkeypatch):
+    monkeypatch.setattr("scripts.build_workshop_bundle._version", lambda: "0.3.0")
+
+
 def test_bundle_contains_rendered_config_project_wheel_and_wheelhouse(tmp_path):
     constraints = tmp_path / "constraints.txt"
     constraints.write_text("httpx==0.28.1\n", encoding="utf-8")
