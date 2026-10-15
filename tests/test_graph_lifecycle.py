@@ -324,3 +324,40 @@ def test_seed_thread_start_failure_preserves_error_and_closes_resources(tmp_path
     ipc.stop.assert_called_once()
     client.close.assert_called_once()
     graph.close.assert_called_once()
+
+
+@pytest.mark.parametrize('detached', [False, True])
+def test_seed_cancellation_bounds_descendant_pipe_wait(tmp_path, detached):
+    import time
+    from netops_api_navigator.tools.execution import _run_script
+    settings = Settings(graph_db_path=tmp_path/'graph', script_library_path=tmp_path,
+                        knowledge_release_repo='')
+    (tmp_path/'seed.py').write_text(
+        'import subprocess, sys, time\nfrom pathlib import Path\n'
+        f'p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], '
+        f'start_new_session={detached and os.name != "nt"})\n'
+        'Path("descendant.pid").write_text(str(p.pid))\ntime.sleep(60)\n'
+    )
+    stop = threading.Event()
+    results = []
+    worker = threading.Thread(target=lambda: results.append(
+        json.loads(_run_script(settings, 'seed.py', stop_event=stop))))
+    worker.start()
+    try:
+        deadline = time.monotonic()+5
+        while not (tmp_path/'descendant.pid').exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert (tmp_path/'descendant.pid').exists()
+        stop.set()
+        worker.join(5)
+        finished_without_pipe_peer = not worker.is_alive()
+    finally:
+        stop.set()
+        if (tmp_path/'descendant.pid').exists():
+            try:
+                os.kill(int((tmp_path/'descendant.pid').read_text()), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        worker.join(5)
+    assert finished_without_pipe_peer
+    assert results[0]['exit_code'] == -1

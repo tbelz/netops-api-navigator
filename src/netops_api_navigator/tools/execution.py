@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -114,28 +115,61 @@ def _run_cancellable(cmd, *, cwd, env, stop_event):
     if stop_event.is_set():
         return subprocess.CompletedProcess(cmd, -1, "", "Server shutting down")
     deadline = time.monotonic() + EXECUTION_TIMEOUT
-    with subprocess.Popen(
-        cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    ) as process:
+    process = subprocess.Popen(
+        cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=os.name != "nt",
+    )
+    try:
+        while True:
+            if stop_event.is_set():
+                stdout, stderr = _terminate_script_tree(process)
+                return subprocess.CompletedProcess(cmd, -1, stdout, stderr)
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(cmd, EXECUTION_TIMEOUT)
+            try:
+                stdout, stderr = process.communicate(timeout=0.1)
+                return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                pass
+    finally:
+        if process.returncode is None:
+            _terminate_script_tree(process)
+
+
+def _terminate_script_tree(process: subprocess.Popen) -> tuple[str, str]:
+    """Kill owned script descendants and reap without waiting forever on pipes.
+
+    Scripts access the graph through IPC, so stopping them prevents new requests;
+    the IPC server still drains any native query already executing in the server.
+    """
+    if os.name == "nt":
+        # taskkill /T handles descendants before terminating the root process.
         try:
-            while True:
-                if stop_event.is_set():
-                    # Scripts only access the DB through IPC. Killing the script
-                    # stops new requests; IPC shutdown drains the current query.
-                    process.kill()
-                    stdout, stderr = process.communicate()
-                    return subprocess.CompletedProcess(cmd, -1, stdout, stderr)
-                if time.monotonic() >= deadline:
-                    raise subprocess.TimeoutExpired(cmd, EXECUTION_TIMEOUT)
-                try:
-                    stdout, stderr = process.communicate(timeout=0.1)
-                    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
-                except subprocess.TimeoutExpired:
-                    pass
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.communicate()
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if process.poll() is None:
+            process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        return process.communicate(timeout=1)
+    except subprocess.TimeoutExpired:
+        # A detached descendant can escape the process tree yet retain a pipe.
+        # It must not prevent graph shutdown. On Windows communicate uses daemon
+        # reader threads: closing their streams here can itself block on a read
+        # lock, so let those readers release the streams when the peer exits.
+        process.wait(timeout=1)
+        if os.name != "nt":
+            process.stdout.close()
+            process.stderr.close()
+        return "", "Script cancelled; a descendant retained an output pipe."
 
 
 def _build_env(

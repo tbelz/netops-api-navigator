@@ -47,7 +47,9 @@ The graph manager now serializes connection scopes and result consumption with
 close. Connections/results are released before the database reference; it does
 not forcibly close a database while outstanding references may still exist.
 IPC shutdown wakes idle sockets and waits for executing requests. Seed shutdown
-polls cancellation at 100 ms, kills/reaps the active script, and skips queued jobs.
+polls cancellation at 100 ms, kills the script process group (or Windows process
+tree), reaps the script, and skips queued jobs. Output draining has a bounded
+fallback for detached descendants that retain pipe descriptors.
 Native graph work is drained rather than forcibly aborted.
 
 Startup recognizes the observed short-read diagnostic as well as explicit WAL
