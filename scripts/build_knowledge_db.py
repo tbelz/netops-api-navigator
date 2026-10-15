@@ -23,7 +23,7 @@ from pathlib import Path
 # Ensure the package is importable when running from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import real_ladybug as lb  # noqa: E402
+import ladybug as lb  # noqa: E402
 
 from netops_api_navigator.compiler.artifact_cache import (  # noqa: E402
     compiler_artifact_identity,

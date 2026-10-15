@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 
 from netops_api_navigator.compiler.ast_builder import (
     UnknownKeywordError,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyarrow as pa
-import real_ladybug as lb
+import ladybug as lb
 
 from .semantic_builder import SemanticGraph
 from .semantic_schema import apply_semantic_schema

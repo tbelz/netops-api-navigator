@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import real_ladybug as lb
+import ladybug as lb
 import structlog
 
 from .schema import (

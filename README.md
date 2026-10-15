@@ -553,3 +553,13 @@ service against the same persistent graph. Never start both transports as writer
 of that graph. Verify initialization and graph queries in two concurrent native
 chats before resuming work. Service shutdown drains HTTP sessions and then follows
 the same seed/IPC/graph cleanup path as STDIO.
+
+### Before upgrading an existing Ladybug graph
+
+The runtime now pins the official `ladybug==0.17.1` distribution to use available
+FTS/algo extensions. **Its first writable open upgrades older graphs from storage
+format 40 to 41, including startup or `doctor`; the old engine cannot reopen them.**
+Stop all graph owners and preserve the complete graph directory, manifest and
+sidecars before starting this version. Rollback requires restoring that backup,
+not merely reinstalling the older Python package. See the
+[upgrade qualification and rollback procedure](docs/ladybug-extension-upgrade.md).

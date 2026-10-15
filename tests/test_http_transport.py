@@ -10,7 +10,7 @@ import time
 
 import httpx
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from starlette.applications import Starlette

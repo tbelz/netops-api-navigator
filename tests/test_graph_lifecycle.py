@@ -11,7 +11,7 @@ import threading
 from unittest.mock import Mock
 
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 
 from netops_api_navigator.config import Settings
 from netops_api_navigator.graph.manager import GraphManager
@@ -158,7 +158,7 @@ def test_seed_shutdown_cancels_current_process_and_skips_next(tmp_path, monkeypa
 WORKER = r'''
 import json, os, threading, time
 from pathlib import Path
-import real_ladybug as lb
+import ladybug as lb
 from netops_api_navigator import server
 from netops_api_navigator.config import Settings
 from netops_api_navigator.graph.manager import GraphManager

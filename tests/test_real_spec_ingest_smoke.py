@@ -28,7 +28,7 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-import real_ladybug as lb  # noqa: E402
+import ladybug as lb  # noqa: E402
 
 from netops_api_navigator.graph.invariants import (  # noqa: E402
     assert_graph_invariants,

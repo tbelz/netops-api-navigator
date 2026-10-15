@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 from mcp.server.fastmcp import FastMCP
 
 from netops_api_navigator.config import Settings
