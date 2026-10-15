@@ -8,7 +8,7 @@ import shutil
 import tempfile
 
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 
 from netops_api_navigator.compiler.ast_builder import build_ast_graph
 from netops_api_navigator.compiler.catalog_identity import canonical_body_hash

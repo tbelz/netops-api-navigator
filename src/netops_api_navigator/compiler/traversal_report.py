@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import real_ladybug as lb
+import ladybug as lb
 
 from .detail_reader import ProjectionDetailError
 from .traversal_reader import fetch_endpoint_context, fetch_schema_context

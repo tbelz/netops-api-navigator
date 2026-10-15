@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import real_ladybug as lb
+import ladybug as lb
 
 _DEFAULT_BUFFER_POOL_SIZE = 256 * 1024 * 1024
 
@@ -299,7 +299,7 @@ def _fetch_ast_node(
                        row.jsonPointer AS jsonPointer,
                        row.name AS name,
                        row.key AS key,
-                       row.index AS index,
+                       row.`index` AS `index`,
                        row.valueType AS valueType,
                        row.rawJson AS rawJson,
                        row.scalarJson AS scalarJson,
@@ -320,7 +320,7 @@ def _fetch_ast_node(
                        row.jsonPointer AS jsonPointer,
                        row.name AS name,
                        row.key AS key,
-                       row.index AS index,
+                       row.`index` AS `index`,
                        row.valueType AS valueType,
                        row.rawJson AS rawJson,
                        row.scalarJson AS scalarJson,

@@ -259,9 +259,9 @@ class TestPopulateDocs:
     def test_populate_docs_inserts_nodes(self):
         """Verify _populate_docs creates DocSection nodes in the database."""
         try:
-            import real_ladybug as lb
+            import ladybug as lb
         except ImportError:
-            pytest.skip("real_ladybug not available")
+            pytest.skip("ladybug not available")
 
         from netops_api_navigator.graph.schema import (
             KNOWLEDGE_NODE_TABLES,

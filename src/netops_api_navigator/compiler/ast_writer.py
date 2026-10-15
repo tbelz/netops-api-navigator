@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyarrow as pa
-import real_ladybug as lb
+import ladybug as lb
 
 from .ast_builder import AstGraph
 from .ast_schema import apply_ast_schema
