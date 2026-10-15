@@ -106,7 +106,7 @@ Install `uv` with `winget install --id=astral-sh.uv -e` on Windows,
 on Linux, then install the exact release from PyPI:
 
 ```text
-uv tool install --python 3.12 --no-build netops-api-navigator==0.3.1
+uv tool install --python 3.12 --no-build netops-api-navigator==0.3.2
 netops-api-navigator doctor --profile workshop --skip-credentials
 ```
 
