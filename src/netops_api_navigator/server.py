@@ -199,6 +199,13 @@ def _initialize_runtime_graph(settings: Settings) -> GraphManager:
         return manager
     except BaseException as exc:
         manager.close()
+        if "could not set lock on file" in str(exc).lower():
+            raise StartupError(
+                f"Graph lock is held by another process: {settings.graph_db_path}. "
+                "Multiple STDIO servers cannot share one graph. Use one persistent "
+                "server with --transport streamable-http and connect each client to "
+                "its /mcp URL. Do not delete the graph or its sidecars."
+            ) from exc
         if not _is_runtime_db_corruption_error(exc):
             raise
         # A runtime graph contains local topology and user-authored scripts, not
@@ -608,6 +615,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--glp-client-id", default=None)
     parser.add_argument("--glp-client-secret", default=None)
     parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio")
+    parser.add_argument("--port", type=int, default=8765, help="Local HTTP port (default: 8765).")
     parser.add_argument("--knowledge-release-tag", default=None)
     parser.add_argument("--knowledge-sha256", default=None)
     parser.add_argument(
@@ -692,6 +701,15 @@ def _local_knowledge_tag(settings: Settings) -> str | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    http_token = os.environ.get("MCP_HTTP_TOKEN", "")
+    if args.command == "serve" and args.transport == "streamable-http":
+        if not (1 <= args.port <= 65535):
+            print("Configuration error: HTTP port must be between 1 and 65535", file=sys.stderr)
+            return 2
+        if len(http_token) < 32 or any(not (33 <= ord(c) <= 126) for c in http_token):
+            print("Configuration error: MCP_HTTP_TOKEN must contain at least 32 ASCII "
+                  "characters without whitespace", file=sys.stderr)
+            return 2
     _apply_cli_environment(args)
     try:
         settings = load_settings()
@@ -721,7 +739,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         serving = True
         if terminating:
             return 128 + signal.SIGTERM
-        runtime.mcp.run(transport="stdio")
+        if args.transport == "streamable-http":
+            from .http_transport import serve_http
+
+            serve_http(runtime.mcp, port=args.port, token=http_token)
+        else:
+            runtime.mcp.run(transport="stdio")
         return 0
     except StartupError as exc:
         logger.error("startup_failed", error=str(exc))

@@ -78,3 +78,33 @@ summary and lifecycle events contain tool names and seed states only. A successf
 probe demonstrates the Codex MCP client path, not attachment to an already-open
 chat. Production deployment, explicit recovery of existing corrupted data, and
 reconnection of that chat remain separate actions.
+
+## Concurrent chats after 0.3.1
+
+A successful single native chat does not prove that a second chat can start its
+own STDIO server against the same graph. On 2026-10-15 the setup chat initialized
+0.3.1 successfully, but the migration chat's separately started server closed
+before its initialize response while the setup server remained alive.
+
+An isolated real-Ladybug reproduction held a graph open with a committed sentinel
+row and attempted opens from separate subprocesses. Both a second writer and a
+read-only opener failed with `Could not set lock on file`. The original owner
+could still read the sentinel, and reopening after clean shutdown preserved it.
+This proves the ownership limitation, without proving the exact exception from
+the failing production child (its stderr was not recovered). A separate reported
+read-only attempt against the live production graph returned a WAL error; that
+alone does not establish durable corruption or authorize restoration.
+
+The supported multi-chat arrangement is one persistent Streamable HTTP service
+with independently initialized MCP sessions. The graph, Central clients, seed
+worker, and script IPC belong to that service, not to an individual chat. The
+new transport is loopback-only and requires a shared bearer token; all clients
+have the same configured account permissions. STDIO remains supported for one
+owner. Client configuration and OS service supervision are explicit deployment
+steps, not automatic graph cloning or background process spawning.
+
+`tests/test_http_transport.py` exercises authenticated independent sessions over
+real HTTP, shared graph writes/reads, disconnect/reconnect, service shutdown and
+post-shutdown graph reopening. Run it with a repo-local pytest base directory.
+Production cutover and two-chat native validation are still required before
+claiming that the migration chat is unblocked.

@@ -371,70 +371,6 @@ wheels = [
 ]
 
 [[package]]
-name = "netops-api-navigator"
-version = "0.3.1"
-source = { editable = "." }
-dependencies = [
-    { name = "httpx" },
-    { name = "mcp" },
-    { name = "networkx" },
-    { name = "platformdirs" },
-    { name = "real-ladybug" },
-    { name = "structlog" },
-]
-
-[package.optional-dependencies]
-compiler = [
-    { name = "openapi-spec-validator" },
-    { name = "prance" },
-    { name = "pyarrow" },
-    { name = "pyyaml" },
-]
-test = [
-    { name = "openapi-spec-validator" },
-    { name = "prance" },
-    { name = "pyarrow" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-timeout" },
-    { name = "pyyaml" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-timeout" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", specifier = ">=1.0.0,<2" },
-    { name = "networkx", specifier = ">=3.0" },
-    { name = "openapi-spec-validator", marker = "extra == 'compiler'", specifier = ">=0.9.0" },
-    { name = "openapi-spec-validator", marker = "extra == 'test'", specifier = ">=0.9.0" },
-    { name = "platformdirs", specifier = ">=4.3" },
-    { name = "prance", marker = "extra == 'compiler'", specifier = ">=25.4.8.0" },
-    { name = "prance", marker = "extra == 'test'", specifier = ">=25.4.8.0" },
-    { name = "pyarrow", marker = "extra == 'compiler'", specifier = ">=15.0" },
-    { name = "pyarrow", marker = "extra == 'test'", specifier = ">=15.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5.0" },
-    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.3" },
-    { name = "pyyaml", marker = "extra == 'compiler'", specifier = ">=6.0" },
-    { name = "pyyaml", marker = "extra == 'test'", specifier = ">=6.0" },
-    { name = "real-ladybug", specifier = ">=0.15.3" },
-    { name = "structlog", specifier = ">=24.0" },
-]
-provides-extras = ["compiler", "test"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-timeout", specifier = ">=2.4.0" },
-]
-
-[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -586,6 +522,70 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fc/6d/62e76bbb8144d6ed86e202b5edd8a4cb631e7c8130f3f4893c3f90262b10/mcp-1.26.0.tar.gz", hash = "sha256:db6e2ef491eecc1a0d93711a76f28dec2e05999f93afd48795da1c1137142c66", size = 608005, upload-time = "2026-01-24T19:40:32.468Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/d9/eaa1f80170d2b7c5ba23f3b59f766f3a0bb41155fbc32a69adfa1adaaef9/mcp-1.26.0-py3-none-any.whl", hash = "sha256:904a21c33c25aa98ddbeb47273033c435e595bbacfdb177f4bd87f6dceebe1ca", size = 233615, upload-time = "2026-01-24T19:40:30.652Z" },
+]
+
+[[package]]
+name = "netops-api-navigator"
+version = "0.3.1"
+source = { editable = "." }
+dependencies = [
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "networkx" },
+    { name = "platformdirs" },
+    { name = "real-ladybug" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+compiler = [
+    { name = "openapi-spec-validator" },
+    { name = "prance" },
+    { name = "pyarrow" },
+    { name = "pyyaml" },
+]
+test = [
+    { name = "openapi-spec-validator" },
+    { name = "prance" },
+    { name = "pyarrow" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-timeout" },
+    { name = "pyyaml" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-timeout" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "mcp", specifier = ">=1.26.0,<2" },
+    { name = "networkx", specifier = ">=3.0" },
+    { name = "openapi-spec-validator", marker = "extra == 'compiler'", specifier = ">=0.9.0" },
+    { name = "openapi-spec-validator", marker = "extra == 'test'", specifier = ">=0.9.0" },
+    { name = "platformdirs", specifier = ">=4.3" },
+    { name = "prance", marker = "extra == 'compiler'", specifier = ">=25.4.8.0" },
+    { name = "prance", marker = "extra == 'test'", specifier = ">=25.4.8.0" },
+    { name = "pyarrow", marker = "extra == 'compiler'", specifier = ">=15.0" },
+    { name = "pyarrow", marker = "extra == 'test'", specifier = ">=15.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5.0" },
+    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.3" },
+    { name = "pyyaml", marker = "extra == 'compiler'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'test'", specifier = ">=6.0" },
+    { name = "real-ladybug", specifier = ">=0.15.3" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+provides-extras = ["compiler", "test"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
 ]
 
 [[package]]

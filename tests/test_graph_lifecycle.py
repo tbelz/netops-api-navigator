@@ -361,3 +361,13 @@ def test_seed_cancellation_bounds_descendant_pipe_wait(tmp_path, detached):
         worker.join(5)
     assert finished_without_pipe_peer
     assert results[0]['exit_code'] == -1
+
+
+def test_second_graph_owner_has_actionable_diagnostic(tmp_path, monkeypatch):
+    from netops_api_navigator import server
+    manager = Mock()
+    manager.initialize.side_effect = RuntimeError('IO exception: Could not set lock on file : graph')
+    monkeypatch.setattr(server, 'GraphManager', lambda path: manager)
+    with pytest.raises(server.StartupError, match='--transport streamable-http'):
+        server._initialize_runtime_graph(Settings(graph_db_path=tmp_path/'graph'))
+    manager.close.assert_called_once()

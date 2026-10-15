@@ -510,3 +510,46 @@ test-marker guidance. Architecture decisions live in [docs/adr/](docs/adr/).
 ## License
 
 MIT
+
+### Multiple local chats sharing one graph
+
+A STDIO client owns its server process. If a desktop starts a separate process
+for each chat, those processes cannot all open the same Ladybug graph. A second
+owner fails at startup; opening the graph read-only does not bypass an active
+writer. Do not delete the database or WAL to resolve ownership errors.
+
+Use one persistent local service for multiple chats:
+
+```bash
+# Supply MCP_HTTP_TOKEN from a protected environment/secret store; generate it
+# once with secrets.token_urlsafe(32), and share it only with trusted local clients.
+netops-api-navigator serve --transport streamable-http --port 8765
+```
+
+The service requires `MCP_HTTP_TOKEN` (at least 32 printable ASCII characters,
+without spaces), binds only to `127.0.0.1`, and serves `/mcp`. Configure its usual
+Central credentials, graph and script-library paths in the service environment.
+Run exactly one instance under your OS service manager. Start it before connecting
+clients. Each client session uses the same account, tools and persistent graph;
+closing a chat ends that session without closing the database. This mode does not
+provide per-user authorization or expose a public remote ChatGPT endpoint.
+
+For a local Codex client, replace the STDIO `command`/`args` configuration with:
+
+```toml
+[mcp_servers.arubacentral]
+url = "http://127.0.0.1:8765/mcp"
+bearer_token_env_var = "MCP_HTTP_TOKEN"
+```
+
+The token must also be available in the **desktop client's** environment, not just
+the service environment. See the [official MCP configuration documentation](https://developers.openai.com/codex/mcp).
+Keep the token out of source control. Missing or incorrect tokens receive HTTP 401.
+STDIO remains the default for a single client.
+
+For an existing installation, first arrange a graceful stop of the current graph
+owner, preserve any existing corruption evidence, and then start the shared
+service against the same persistent graph. Never start both transports as writers
+of that graph. Verify initialization and graph queries in two concurrent native
+chats before resuming work. Service shutdown drains HTTP sessions and then follows
+the same seed/IPC/graph cleanup path as STDIO.
