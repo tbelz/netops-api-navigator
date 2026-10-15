@@ -195,10 +195,13 @@ def test_connected_workshop_starts_only_trusted_background_seeds(monkeypatch, tm
     captured: dict = {}
 
     class _CapturedThread:
+        ident = None
+
         def __init__(self, *, target, args, name, daemon):
             captured.update(target=target, args=args, name=name, daemon=daemon)
 
         def start(self):
+            self.ident = 1
             captured["started"] = True
 
         def join(self):

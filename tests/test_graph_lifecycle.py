@@ -301,3 +301,26 @@ def test_sigterm_during_factory_finishes_ownership_transfer_then_closes(monkeypa
     runtime.mcp.run.assert_not_called()
     runtime.close.assert_called_once()
     assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_seed_thread_start_failure_preserves_error_and_closes_resources(tmp_path, monkeypatch):
+    from netops_api_navigator import server
+    client, graph, ipc = Mock(), Mock(), Mock()
+    ipc.environment = {}
+    class FailedThread:
+        ident = None
+        def __init__(self, **kwargs): pass
+        def start(self): raise RuntimeError('thread capacity exhausted')
+        def join(self): raise AssertionError('must not join an unstarted thread')
+    monkeypatch.setattr(server.threading, 'Thread', FailedThread)
+    monkeypatch.setattr(server, 'GraphIPCServer', lambda graph: ipc)
+    monkeypatch.setattr(server, '_create_central_client', lambda *a, **k: (client, False))
+    monkeypatch.setattr(server, '_initialize_runtime_graph', lambda settings: graph)
+    monkeypatch.setattr(server, '_load_api_tree', lambda *args: '')
+    monkeypatch.setattr(server, '_prepare_script_library', lambda *args: None)
+    settings = Settings(graph_db_path=tmp_path/'graph', knowledge_release_repo='')
+    with pytest.raises(RuntimeError, match='thread capacity exhausted'):
+        server.create_server(settings)
+    ipc.stop.assert_called_once()
+    client.close.assert_called_once()
+    graph.close.assert_called_once()

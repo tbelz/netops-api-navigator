@@ -73,7 +73,8 @@ class ServerRuntime:
         # Stop admitting seed jobs, cancel the active subprocess, then drain IPC.
         self.stop_event.set()
         if self.seed_thread is not None:
-            self.seed_thread.join()
+            if self.seed_thread.ident is not None:
+                self.seed_thread.join()
             self.seed_thread = None
         if self.ipc_server is not None:
             self.ipc_server.stop()
@@ -203,7 +204,7 @@ def _initialize_runtime_graph(settings: Settings) -> GraphManager:
         # A runtime graph contains local topology and user-authored scripts, not
         # just a disposable knowledge cache. Never replace it during startup.
         raise StartupError(
-            f"Persisted graph is unreadable: {settings.graph_db_path}. "
+            f"Persisted graph is unreadable: {settings.graph_db_path}. Ladybug error: {exc}. "
             "Database and sidecars have been preserved. Stop all graph owners and "
             "back up the database, WAL, shadow file and manifest before an explicit "
             "restore from a verified knowledge snapshot; restoring loses local graph changes."

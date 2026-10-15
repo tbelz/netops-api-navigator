@@ -63,11 +63,36 @@ err_file = Path(err_path)
 out_file.touch()
 err_file.touch()
 
+# Corruption is evidence, not permission to discard local graph state.
+corrupt = subprocess.run(
+    ["docker", "run", "--rm", "-v", f"{volume}:/data",
+     "-e", "KNOWLEDGE_RELEASE_REPO=", "-e", "MCP_KNOWLEDGE_PROJECTION=v2",
+     image, "doctor", "--skip-credentials"],
+    capture_output=True, text=True, timeout=60,
+)
+if corrupt.returncode != 1 or "preserved" not in corrupt.stdout:
+    raise SystemExit(f"Corrupt graph did not fail closed: {corrupt.stdout} {corrupt.stderr}")
+
+
+def assert_evidence_preserved():
+    subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "python", "-v", f"{volume}:/data",
+         image, "-c", "from pathlib import Path; "
+         "assert Path('/data/graph_db').read_bytes() == b'not a ladybug database'; "
+         "assert Path('/data/graph_db.wal').read_bytes() == b'stale corrupt wal'; "
+         "assert Path('/data/manifest.json').exists()"],
+        check=True, timeout=30,
+    )
+
+
+assert_evidence_preserved()
+
 cmd = [
     "docker", "run", "-i", "--rm",
     "-v", f"{volume}:/data",
     "-e", f"KNOWLEDGE_RELEASE_REPO={repo}",
     "-e", "MCP_KNOWLEDGE_PROJECTION=v2",
+    "-e", "GRAPH_DB_PATH=/data/fresh/graph_db",
     "-e", "MCP_COMPILER_TOOLS=true",
     image,
 ]
@@ -410,14 +435,9 @@ if status != 0:
         f"--- stdout ---\n{out_file.read_text(encoding='utf-8', errors='replace')}"
     )
 
-stderr = "".join(stderr_lines) or err_file.read_text(encoding="utf-8", errors="replace")
-if "knowledge_db_refresh_forced" not in stderr:
-    raise SystemExit(f"Expected forced DB refresh recovery log was not emitted\n{stderr}")
-if "Corrupted wal file" in stderr.split("knowledge_db_reinstall_recovered")[-1]:
-    raise SystemExit(f"WAL corruption persisted after recovery\n{stderr}")
-
+assert_evidence_preserved()
 print(
-    "v2 discovery smoke recovered persisted DB and called every registered "
-    "discovery-only tool"
+    "v2 discovery smoke preserved the corrupt graph, installed into a fresh "
+    "directory, and called every registered discovery-only tool"
 )
 PY
