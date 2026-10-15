@@ -9,7 +9,7 @@ import tempfile
 
 import pytest
 import pyarrow as pa
-import real_ladybug as lb
+import ladybug as lb
 
 from netops_api_navigator.compiler.ast_builder import build_ast_graph
 from netops_api_navigator.compiler.projection_writer import (

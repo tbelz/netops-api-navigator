@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 import yaml
 
 from netops_api_navigator.compiler.ast_builder import UnknownKeywordError

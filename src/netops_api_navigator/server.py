@@ -182,6 +182,7 @@ def _is_runtime_db_corruption_error(exc: BaseException) -> bool:
         return False
     if any(marker in msg for marker in (
         "corrupted wal file", "invalid wal record", "not a database", "reading past the end",
+        "the file is not a valid lbug database file",
     )):
         return True
     short_read = re.search(r"numbytesread:\s*(\d+)\s+numbytestoread:\s*(\d+)", msg)

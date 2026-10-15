@@ -11,7 +11,7 @@ import threading
 from unittest.mock import Mock
 
 import pytest
-import real_ladybug as lb
+import ladybug as lb
 
 from netops_api_navigator.config import Settings
 from netops_api_navigator.graph.manager import GraphManager
@@ -22,6 +22,8 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.parametrize(('message', 'expected'), [
     ('Runtime exception: Corrupted wal file. Read out invalid WAL record type.', True),
+    ('Runtime exception: Unable to open database. '
+     'The file is not a valid Lbug database file!', True),
     ('IO exception: Cannot read from file: graph fileDescriptor: 7 '
      'numBytesRead: 0 numBytesToRead: 4096 position: 4901969379328', True),
     ('IO exception: Cannot read from file: graph numBytesRead: 128 numBytesToRead: 4096', True),
@@ -158,7 +160,7 @@ def test_seed_shutdown_cancels_current_process_and_skips_next(tmp_path, monkeypa
 WORKER = r'''
 import json, os, threading, time
 from pathlib import Path
-import real_ladybug as lb
+import ladybug as lb
 from netops_api_navigator import server
 from netops_api_navigator.config import Settings
 from netops_api_navigator.graph.manager import GraphManager

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
-import real_ladybug as lb
+import ladybug as lb
 
 from netops_api_navigator.graph.schema import (
     KNOWLEDGE_NODE_TABLES,

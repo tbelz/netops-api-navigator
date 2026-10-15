@@ -24,7 +24,7 @@ AST_NODE_TABLES: list[str] = [
         jsonPointer STRING,
         name        STRING,
         key         STRING,
-        index       INT64,
+        `index`     INT64,
         valueType   STRING,
         rawJson     STRING,
         scalarJson  STRING,
@@ -41,7 +41,7 @@ AST_REL_TABLES: list[str] = [
         FROM OasAstNode TO OasAstNode,
         role  STRING,
         key   STRING,
-        index INT64
+        `index` INT64
     )
     """,
     """

@@ -159,7 +159,7 @@ against the pre-ADR-012 populator.
 
 - `CALL show_tables() RETURN * WHERE type = 'NODE'` is **invalid** — WHERE doesn't work with CALL. Filter in Python after `rows_as_dict()`.
 - Always use `IF NOT EXISTS` in DDL for idempotent schema application.
-- Use `python3.12` for tests (python3/3.10 lacks `real_ladybug`).
+- Use `python3.12` for tests (python3/3.10 lacks the configured `ladybug` environment).
 
 ## Testing
 
