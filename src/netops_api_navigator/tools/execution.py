@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -25,6 +26,7 @@ def _run_script(
     parameters: dict[str, str] | None = None,
     *,
     ipc_env: dict[str, str] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> str:
     """Execute a script from the library and return JSON result.
 
@@ -64,11 +66,9 @@ def _run_script(
     logger.info("script_execution_start", filename=filename, parameters=parameters)
 
     try:
-        result = subprocess.run(
+        result = _run_cancellable(
             cmd,
-            capture_output=True,
-            text=True,
-            timeout=EXECUTION_TIMEOUT,
+            stop_event=stop_event,
             cwd=str(lib),
             env=env,
         )
@@ -103,6 +103,39 @@ def _run_script(
     except Exception as e:
         logger.error("script_execution_error", filename=filename, error=str(e))
         return json.dumps({"error": f"Execution failed: {str(e)}"})
+
+
+def _run_cancellable(cmd, *, cwd, env, stop_event):
+    """Drain both pipes while polling cancellation; always reap the child."""
+    if stop_event is None:
+        return subprocess.run(
+            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=EXECUTION_TIMEOUT
+        )
+    if stop_event.is_set():
+        return subprocess.CompletedProcess(cmd, -1, "", "Server shutting down")
+    deadline = time.monotonic() + EXECUTION_TIMEOUT
+    with subprocess.Popen(
+        cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ) as process:
+        try:
+            while True:
+                if stop_event.is_set():
+                    # Scripts only access the DB through IPC. Killing the script
+                    # stops new requests; IPC shutdown drains the current query.
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    return subprocess.CompletedProcess(cmd, -1, stdout, stderr)
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(cmd, EXECUTION_TIMEOUT)
+                try:
+                    stdout, stderr = process.communicate(timeout=0.1)
+                    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
 
 
 def _build_env(

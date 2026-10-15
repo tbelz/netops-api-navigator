@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import socket
 import socketserver
 import threading
 from typing import TYPE_CHECKING
@@ -26,6 +27,13 @@ class _GraphRequestHandler(socketserver.StreamRequestHandler):
     """Handle newline-delimited JSON requests from one child process."""
 
     def handle(self) -> None:
+        try:
+            self._handle_requests()
+        except OSError:
+            # Peer disconnected or shutdown interrupted an idle socket.
+            pass
+
+    def _handle_requests(self) -> None:
         manager: GraphManager = self.server.graph_manager  # type: ignore[attr-defined]
         expected_token: str = self.server.capability_token  # type: ignore[attr-defined]
         for raw_line in self.rfile:
@@ -65,8 +73,41 @@ class _GraphRequestHandler(socketserver.StreamRequestHandler):
 
 
 class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    daemon_threads = True
+    daemon_threads = False
     allow_reuse_address = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._requests: set[socket.socket] = set()
+        self._requests_lock = threading.Lock()
+
+    def process_request(self, request, client_address):
+        with self._requests_lock:
+            self._requests.add(request)
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            with self._requests_lock:
+                self._requests.discard(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._requests_lock:
+                self._requests.discard(request)
+
+    def drain(self):
+        # Called after shutdown() stops admission. Wake idle readers without
+        # interrupting graph work, then server_close() joins every handler.
+        with self._requests_lock:
+            for request in self._requests:
+                try:
+                    request.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        self.server_close()
 
 
 class GraphIPCServer:
@@ -109,6 +150,7 @@ class GraphIPCServer:
         self._server.capability_token = self._token  # type: ignore[attr-defined]
         self._thread = threading.Thread(
             target=self._server.serve_forever,
+            kwargs={"poll_interval": 0.05},
             name="netops-api-navigator-graph-ipc",
             daemon=True,
         )
@@ -118,7 +160,7 @@ class GraphIPCServer:
     def stop(self) -> None:
         if self._server is not None:
             self._server.shutdown()
-            self._server.server_close()
+            self._server.drain()
             self._server = None
         if self._thread is not None:
             self._thread.join(timeout=2)

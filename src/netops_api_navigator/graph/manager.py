@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -41,13 +42,13 @@ class GraphManager:
     for direct reads and writes via ``central_helpers.graph``.
 
     Thread safety: the Database object is thread-safe; Connection is not.
-    We use a threading.Lock to serialise connection access.
+    Connection scopes are serialized with close, including result consumption.
     """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         self._db: lb.Database | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._fts_available: bool = False
 
     @property
@@ -66,8 +67,10 @@ class GraphManager:
         logger.info("graph_init_start", db_path=str(self._db_path))
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = lb.Database(str(self._db_path))
-        conn = self._get_conn()
+        with self._connection() as conn:
+            self._initialize_schema(conn)
 
+    def _initialize_schema(self, conn: lb.Connection) -> None:
         # Bootstrap: knowledge layer + legacy domain tables
         bootstrap_ddl = (
             NODE_TABLES + KNOWLEDGE_NODE_TABLES
@@ -250,7 +253,10 @@ class GraphManager:
             logger.info("fts_indexes_skipped", reason="FTS extension not available")
             return 0
 
-        conn = self._get_conn()
+        with self._connection() as conn:
+            return self._create_fts_indexes(conn)
+
+    def _create_fts_indexes(self, conn: lb.Connection) -> int:
         fts_defs: list[tuple[str, str, list[str]]] = [
             ("api_fts", "ApiEndpoint", ["summary", "description", "path", "operationId"]),
             ("doc_fts", "DocSection", ["title", "content"]),
@@ -305,9 +311,9 @@ class GraphManager:
                 "Only read queries (MATCH, RETURN, WITH, WHERE, ORDER BY, LIMIT, UNION, UNWIND, CALL) are permitted."
             )
 
-        conn = self._get_conn()
-        result = conn.execute(cypher, parameters=params or {})
-        return list(result.rows_as_dict())
+        with self._connection() as conn:
+            with conn.execute(cypher, parameters=params or {}) as result:
+                return list(result.rows_as_dict())
 
     def execute(self, cypher: str, params: dict | None = None) -> list[dict[str, Any]]:
         """Execute a Cypher statement (including writes) and return results.
@@ -321,16 +327,19 @@ class GraphManager:
         Returns:
             List of result rows as dicts (empty for write statements).
         """
-        conn = self._get_conn()
-        result = conn.execute(cypher, parameters=params or {})
-        return list(result.rows_as_dict())
+        with self._connection() as conn:
+            with conn.execute(cypher, parameters=params or {}) as result:
+                return list(result.rows_as_dict())
 
     def get_schema_description(self) -> str:
         """Return a dynamic schema description by introspecting the LadybugDB catalog."""
         if self._db is None:
             return "Graph not initialized."
 
-        conn = self._get_conn()
+        with self._connection() as conn:
+            return self._schema_description(conn)
+
+    def _schema_description(self, conn: lb.Connection) -> str:
         lines = ["# Graph Schema — Aruba Central Configuration & Topology\n"]
 
         # Node tables
@@ -815,16 +824,14 @@ traversals) use `query_graph()` directly.
 
     # ── Internal ──────────────────────────────────────────────────
 
-    def _get_conn(self) -> lb.Connection:
-        """Get a connection, serialised via lock.
-
-        Raises:
-            RuntimeError: If the database is not initialized.
-        """
+    @contextmanager
+    def _connection(self):
+        """Serialize complete operations, including result consumption, with close."""
         with self._lock:
             if self._db is None:
                 raise RuntimeError("Graph database is not initialized.")
-            return lb.Connection(self._db)
+            with lb.Connection(self._db) as conn:
+                yield conn
 
 
 def _execute_idempotent_alter(conn: lb.Connection, stmt: str) -> None:

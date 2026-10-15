@@ -145,7 +145,7 @@ server.py  main() → load_settings() → create_server()
     ├── Validate Central credential completeness
     ├── CentralClient.validate()     → OAuth2 token check when credentials exist
     │
-    ├── download_knowledge_db()      → select knowledge-db-* release, verify SHA-256,
+    ├── download_knowledge_db()      → for a new runtime graph: select release, verify SHA-256,
     │                                  stage and atomically install
     ├── _check_knowledge_pin()       → enforce optional release/digest pin
     ├── GraphManager.initialize()    → open / create LadybugDB, apply bootstrap DDL + migrations
@@ -257,10 +257,10 @@ Performs a lightweight token fetch. Called at startup; any exception causes `sys
 
 ### 4.3 Knowledge DB (`knowledge_db.py`)
 
-At startup, `download_knowledge_db(repo, db_path)` checks the local `manifest.json`
-for a `release_tag` and compares it with the latest GitHub release. If they differ
-(or no local copy exists), it downloads `knowledge_db.tar.gz` from the release assets,
-extracts it to `db_path`, and stamps the new `release_tag` into the manifest.
+For a new runtime graph, startup calls `download_knowledge_db(repo, db_path)` to
+install a verified release and its manifest. Existing runtime graphs are reused,
+not refreshed or replaced automatically, because they contain local state.
+Unreadable graphs fail closed with restore guidance; see the README startup section.
 
 Timeouts: 8 s for the release-info API call, 120 s for the download, to avoid
 blocking the MCP client's `initialize` budget.
