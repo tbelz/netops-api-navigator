@@ -1,6 +1,6 @@
 [project]
 name = "netops-api-navigator"
-version = "0.3.0"
+version = "0.3.1"
 description = "Independent MCP server for graph-backed network API discovery and automation"
 readme = "README.md"
 license = { text = "MIT" }
