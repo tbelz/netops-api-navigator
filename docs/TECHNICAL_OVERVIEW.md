@@ -1,6 +1,6 @@
 # NetOps API Navigator — Technical Overview
 
-> Version: `0.3.0` · Python `≥ 3.12` · Transport: `stdio`
+> Version: `0.3.2` · Python `≥ 3.12` · Transport: `stdio` or authenticated localhost Streamable HTTP
 
 This document is the single authoritative reference for anyone who needs to understand
 how the MCP server is built, what contracts its components expose to one another, and how
@@ -79,6 +79,11 @@ The server exposes three surfaces to MCP clients:
 | **Tools** | Callable functions (API calls, graph queries, script management) |
 | **Resources** | Read-only structured content (`graph://schema`, `api://endpoint-catalog`, `docs://…`) |
 | **Prompts** | Guided workflow templates injected as pre-filled messages |
+
+The graph combines build-time API/documentation knowledge with runtime network
+topology. Opt-in runtime hydration adds observations, provenance and materialized
+facts/entities linked back to API definitions; see the
+[runtime profiles](USER_GUIDE.md#runtime-hydration-foundation).
 
 ---
 
@@ -414,6 +419,90 @@ In-memory search index (legacy, used by older `search_api_catalog` flow):
 
 ### 4.7 MCP Tools (`tools/`)
 
+<a id="tool-surface"></a>
+
+Availability below refers to the full profile unless stated otherwise. The
+workshop profile exposes graph discovery and status, plus Central GET calls and
+bounded pagination when connected. It disables script tools, graph writes,
+compiler diagnostics and runtime hydration. See [profiles](USER_GUIDE.md#runtime-modes).
+
+#### Graph And Discovery Tools
+
+| Tool | Mode | Purpose |
+| --- | --- | --- |
+| `query_fts` | Always | Full-text search over endpoint, property, doc, script, and runtime indexes. Use this for keyword-first discovery. |
+| `query_api_schema` | Always | Focused Cypher over endpoints, parameters, request/response bodies, schema components, properties, and API/YANG edges. |
+| `query_yang` | Always | YANG path, CLI command, and config-profile reverse lookup. |
+| `query_topology` | Always | Runtime topology graph queries over orgs, sites, devices, groups, and neighbor edges. |
+| `query_graph` | Always | Broad read-only Cypher escape hatch for cross-domain graph queries. |
+| `get_raw_schema` | Always | Fetch raw OpenAPI JSON for known `SchemaComponent` IDs when graph fields are not enough. |
+| `get_server_status` | Always | Secret-free profile, connection and topology status. |
+| `write_graph` | Full profile | Local graph writes for enrichment and script metadata. |
+
+The read tools support batch mode with `queries=[...]`. Responses are capped to
+keep MCP payloads manageable; oversized cells return truncation envelopes with
+next-step hints.
+
+#### Live API Tools
+
+| Tool | Mode | Purpose |
+| --- | --- | --- |
+| `call_central_api` | Connected | Authenticated Central REST call with graph-backed pre-flight validation. |
+| `paginate_central_api` | Connected workshop | Complete, bounded GET-only Central collection fetch with cursor/offset auto-detection. |
+| `call_greenlake_api` | Connected plus GLP credentials | Authenticated GreenLake Platform REST call with validation. |
+
+#### Script Tools
+
+| Tool | Mode | Purpose |
+| --- | --- | --- |
+| `list_scripts` | Full profile | List saved and seed scripts, optionally by tag. |
+| `get_script_content` | Full profile | Read a script from the library. |
+| `save_script` | Full profile | Save or update a reusable Python script. |
+| `execute_script` | Connected full profile | Run a script with Central/GreenLake helpers injected. |
+
+#### Compiler Tools
+
+| Tool | Mode | Purpose |
+| --- | --- | --- |
+| `get_openapi_source_detail` | `MCP_COMPILER_TOOLS=true` | Resolve a compiler projection row back to projection data, provenance, AST metadata, and raw OpenAPI source. |
+| `get_compiler_graph_health` | `MCP_COMPILER_TOOLS=true` | Run bounded traversal-health samples against compiler artifacts. |
+
+#### Runtime Hydration Tools
+
+| Tool | Mode | Purpose |
+| --- | --- | --- |
+| `get_runtime_hydration_status` | `MCP_RUNTIME_HYDRATION=true` | Report the opt-in hydration stage, graph availability, provider readiness, and schema tables. |
+| `list_runtime_hydration_providers` | `MCP_RUNTIME_HYDRATION=true` | List supported provider boundaries, aliases, configured status, and hydration client availability. |
+| `list_runtime_hydration_candidates` | `MCP_RUNTIME_HYDRATION=true` | List GET endpoints that can be planned for future generic hydration from the compiled API graph. |
+| `plan_runtime_hydration` | `MCP_RUNTIME_HYDRATION=true` | Plan whether to use facts, materialize observations, hydrate, refresh, configure a provider, or ask for parameters. |
+| `hydrate_runtime_endpoint` | `MCP_RUNTIME_HYDRATION=true` plus credentials | Execute one bounded GET hydration and persist raw observation/provenance nodes. |
+| `list_runtime_observations` | `MCP_RUNTIME_HYDRATION=true` | List previously persisted runtime observations without calling live APIs. |
+| `get_runtime_observation` | `MCP_RUNTIME_HYDRATION=true` | Fetch one observation with observed objects and fields. |
+| `get_runtime_hydration_state` | `MCP_RUNTIME_HYDRATION=true` | Report whether hydrated state for an endpoint is missing, fresh, stale, or unknown. |
+| `materialize_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | Promote observed objects with clear identity into generic `RuntimeFact` nodes. |
+| `list_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | List materialized facts by endpoint, entity type, or identity key. |
+| `get_runtime_fact` | `MCP_RUNTIME_HYDRATION=true` | Fetch one materialized fact with provenance back to observation, run, and endpoint. |
+| `promote_runtime_entities` | `MCP_RUNTIME_HYDRATION=true` | Roll clear-identity facts into generic provider-scoped `RuntimeEntity` highway nodes. |
+| `list_runtime_entities` | `MCP_RUNTIME_HYDRATION=true` | List generic entity highways by provider, endpoint, entity type, or identity key. |
+| `get_runtime_entity` | `MCP_RUNTIME_HYDRATION=true` | Fetch one generic entity highway with fact-level provenance. |
+
+#### Recommended Discovery Flow
+
+1. Read `api://endpoint-catalog` or `docs://endpoint-catalog` for a path-tree
+   overview when the endpoint family is already obvious.
+2. Use `query_fts` when starting from a keyword such as a feature name, field,
+   config concept, or CLI term.
+3. Use `query_api_schema` to inspect exact parameters, request bodies, response
+   schemas, `COMPOSED_OF`, `PROPERTY_OF_TYPE`, and `HAS_ITEM_SCHEMA` traversal.
+4. Use `query_yang` when mapping YANG paths, CLI commands, or config-profile
+   concepts back to API endpoints and schema properties.
+5. Use `get_raw_schema` only for a known component when the structured graph
+   omits source detail that you need.
+6. In connected mode, call `call_central_api` or `call_greenlake_api` after
+   validating the method, path, parameters, and body shape.
+
+Implementation details:
+
 #### `tools/api_call.py`
 
 | Tool | Signature | Notes |
@@ -715,88 +804,16 @@ cp build/spec_cache/glp/<slug>.json            tests/fixtures/oas/real_excerpts/
 
 ## 8. Deployment & Configuration
 
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `CENTRAL_BASE_URL` | ✅ | — | `https://internal.api.central.arubanetworks.com` |
-| `CENTRAL_CLIENT_ID` | ✅ | — | OAuth2 client ID |
-| `CENTRAL_CLIENT_SECRET` | ✅ | — | OAuth2 client secret |
-| `GREENLAKE_CLIENT_ID` / `GLP_CLIENT_ID` | ❌ | Falls back to Central | GreenLake client ID |
-| `GREENLAKE_CLIENT_SECRET` / `GLP_CLIENT_SECRET` | ❌ | Falls back to Central | GreenLake client secret |
-| `GLP_BASE_URL` | ❌ | `https://global.api.greenlake.hpe.com` | GreenLake base URL |
-| `MCP_PROFILE` | ❌ | `full` | Runtime surface: `full` or fail-closed `workshop` |
-| `SCRIPT_LIBRARY_PATH` | ❌ | per-user app data | Writable directory for user scripts |
-| `GRAPH_DB_PATH` | ❌ | per-user app data | LadybugDB file path |
-| `SPEC_CACHE_DIR` | ❌ | per-user cache | OpenAPI/compiler download cache |
-| `KNOWLEDGE_RELEASE_REPO` | ❌ | this repository | `owner/repo` for knowledge DB download |
-| `KNOWLEDGE_RELEASE_TAG` | ❌ | newest `knowledge-db-*` | Immutable knowledge snapshot pin |
-| `KNOWLEDGE_ASSET_SHA256` | ❌ | GitHub asset digest | Optional explicit SHA-256 pin |
-| `INVENTORY_CACHE_TTL` | ❌ | `300` | Seconds to cache inventory in memory |
-| `GLP_INCLUDED_SLUGS` | ❌ | `*` | Comma-separated GreenLake service slugs |
-| `READ_ONLY` | ❌ | `false` | Block mutating API calls |
-| `MCP_GRAPH_STALE_THRESHOLD_SECONDS` | ❌ | `900` | Freshness warning threshold |
-
-### Native Python package
-
-The supported Docker-free production path is the Python wheel built from this
-repository. `uv` installs a managed Python 3.12 runtime and the exact locked
-binary dependencies without requiring administrator rights, WSL, or Docker:
-
-```bash
-uv tool install --python 3.12 --no-build --constraints constraints.txt netops-api-navigator==0.3.0
-netops-api-navigator doctor --profile workshop --skip-credentials
-```
-
-Pull requests build and install the wheel on Windows x64, macOS Apple Silicon,
-and Linux, then exercise `doctor` and an MCP stdio handshake. Version tags
-publish wheel/sdist to PyPI and attach constraints, checksums, and the workshop
-starter ZIP to a GitHub release.
-
-### Docker
-
-A `Dockerfile` is provided. The image entrypoint is:
-
-```bash
-netops-api-navigator  # = python -m netops_api_navigator.server
-```
-
-### Claude Desktop / Claude Code
-
-```json
-{
-  "mcpServers": {
-    "netops-api-navigator": {
-      "command": "uvx",
-      "args": ["netops-api-navigator"],
-      "env": {
-        "CENTRAL_BASE_URL": "...",
-        "CENTRAL_CLIENT_ID": "...",
-        "CENTRAL_CLIENT_SECRET": "..."
-      }
-    }
-  }
-}
-```
-
----
+See the [user guide](USER_GUIDE.md) for native and Docker installation,
+configuration variables, graph snapshots, shared local service operation,
+and backup/rollback procedures. STDIO is the default; the HTTP service binds
+to localhost and requires a bearer token.
 
 ## 9. Read-Only Mode
 
-When `READ_ONLY=true`:
-
-- `call_central_api` and `call_greenlake_api` reject non-GET methods with a `ToolError`.
-- The API endpoint path-tree embedded in system instructions omits non-GET methods.
-- The `api://endpoint-catalog` resource also filters to GET-only.
-- Local graph writes (`write_graph`) and script CRUD / execution remain available.
-
-`MCP_PROFILE=workshop` is stricter than general read-only mode. It permanently
-enables network read-only operation and omits direct graph writes, user script
-CRUD/execution, GreenLake, compiler/hydration tools, and prompts. Connected
-workshop sessions add a bounded GET-only paginator and automatically run only
-the bundled base-graph and L2-topology seeds against the private local graph.
-
----
+See [runtime modes](USER_GUIDE.md#runtime-modes) for the difference between
+network read-only mode and the fail-closed workshop profile. Network read-only
+mode still permits local graph writes and Python script execution.
 
 ## 10. Error Handling Strategy
 

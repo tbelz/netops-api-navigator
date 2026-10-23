@@ -52,7 +52,10 @@ def build_bundle(
     with tempfile.TemporaryDirectory() as temp:
         stage = Path(temp) / f"netops-api-navigator-workshop-v{version}"
         (stage / ".vscode").mkdir(parents=True)
-        shutil.copy2(source / "README.md", stage / "README.md")
+        readme = (source / "README.md").read_text(encoding="utf-8")
+        (stage / "README.md").write_text(
+            readme.replace("__PROJECT_WHEEL__", wheel.name), encoding="utf-8"
+        )
         (stage / ".vscode" / "mcp.json").write_text(rendered_config, encoding="utf-8")
         shutil.copy2(constraints, stage / "constraints.txt")
         shutil.copy2(wheel, stage / wheel.name)

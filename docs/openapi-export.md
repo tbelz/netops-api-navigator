@@ -120,11 +120,17 @@ GitHub Pages must be enabled with **GitHub Actions** as the build source. The
 standard workflow permissions `contents: write`, `pages: write` and
 `id-token: write`; it requires no additional secret or external hosting account.
 
-Each successful run creates an immutable
-`openapi-YYYYMMDD-RUN_ID-RUN_ATTEMPT` release with `make_latest: false`, then deploys
-the complete Pages artifact. Serializing the daily workflow prevents overlapping
+Each successful run compares the three API file checksums with the last
+`openapi-*` snapshot, paginating through release history. Changed API content
+creates an immutable `openapi-YYYYMMDD-RUN_ID-RUN_ATTEMPT` release with
+`make_latest: false`; report timestamps alone do not create releases. A failed
+comparison stops publication. Every successful comparison, including unchanged
+content, deploys the complete Pages artifact with its fresh report. Serializing the daily workflow prevents overlapping
 runs from replacing a newer publication with an older one. No changes to the
 existing knowledge release selection or raw archive format are required.
+
+The latest Pages report can be newer than the last immutable snapshot. Software
+and data releases are described in the [release guide](RELEASING.md).
 
 The publishing job checks all public files, their JSON content type, CORS headers
 and checksums. It retries briefly for Pages/CDN propagation. A failed exporter
