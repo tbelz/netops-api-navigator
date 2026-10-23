@@ -36,11 +36,14 @@ def test_bundle_contains_rendered_config_project_wheel_and_wheelhouse(tmp_path):
             f"{root}/wheelhouse/httpx-0.28.1-py3-none-any.whl",
         }
         config = archive.read(f"{root}/.vscode/mcp.json").decode()
+        readme = archive.read(f"{root}/README.md").decode()
 
     assert "__PROJECT_WHEEL__" not in config
     assert f"${{workspaceFolder}}/{wheel.name}" in config
     assert '"--no-index"' in config
     assert '"netops-api-navigator"' in config
+    assert f"--from ./{wheel.name}" in readme
+    assert "__PROJECT_WHEEL__" not in readme
 
 
 def test_bundle_rejects_a_wheel_for_another_version(tmp_path):

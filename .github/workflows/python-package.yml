@@ -34,6 +34,14 @@ jobs:
         run: |
           VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           test "v${VERSION}" = "${GITHUB_REF_NAME}"
+      - name: Validate and render curated release notes before publishing
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: >-
+          uv run --no-project python scripts/render_release_notes.py
+          --tag "$RELEASE_TAG" --repository "${GITHUB_REPOSITORY}"
+          --output dist/release-notes.md
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: python-base-distribution
@@ -41,6 +49,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/constraints.txt
+            dist/release-notes.md
           if-no-files-found: error
           retention-days: 14
 
@@ -108,7 +117,7 @@ jobs:
         working-directory: dist
         shell: bash
         run: |
-          find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.tmp
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' ! -name 'release-notes.md' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.tmp
           mv SHA256SUMS.tmp SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -341,8 +350,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          # Notes are build metadata, not a release asset or checksummed download.
+          mv dist/release-notes.md release-notes.md
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
+            gh release edit "${GITHUB_REF_NAME}" --notes-file release-notes.md --latest --title "NetOps API Navigator ${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
           else
-            gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --latest --title "NetOps API Navigator ${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+            gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --notes-file release-notes.md --latest --title "NetOps API Navigator ${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
           fi

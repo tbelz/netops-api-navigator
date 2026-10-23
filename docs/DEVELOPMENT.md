@@ -1,10 +1,22 @@
 # Graph Schema & Build Pipeline
 
+## Local setup
+
+Use `uv` for Python commands. Start with `uv sync --extra test`, then
+`uv run netops-api-navigator` to run the server. See the [user guide](USER_GUIDE.md)
+for credentials and deployment options.
+
+Use `bash scripts/dev_test.sh` for the fast unit subset or
+`bash scripts/test_changed.sh` for tests selected from changed files. The full
+`uv run pytest` suite runs in CI. [Release preparation](RELEASING.md) describes
+curated notes, package publishing and data snapshots; the
+[technical overview](TECHNICAL_OVERVIEW.md) covers architecture and tool contracts.
+
 ## Overview
 
 The graph schema uses a single bootstrap DDL layer:
 
-1. **Bootstrap DDL** ([src/netops_api_navigator/graph/schema.py](src/netops_api_navigator/graph/schema.py)) — Static node/relationship tables for the core domain model (Org, Site, Device, ConfigProfile, etc.) and knowledge layer (ApiEndpoint, ApiCategory, DocSection, Script).
+1. **Bootstrap DDL** ([src/netops_api_navigator/graph/schema.py](../src/netops_api_navigator/graph/schema.py)) — Static node/relationship tables for the core domain model (Org, Site, Device, ConfigProfile, etc.) and knowledge layer (ApiEndpoint, ApiCategory, DocSection, Script).
 
 ## Runtime modes
 

@@ -57,6 +57,8 @@ include = ["src/netops_api_navigator"]
 python-preference = "only-managed"
 
 [project.urls]
+Documentation = "https://github.com/tbelz/netops-api-navigator/blob/main/docs/USER_GUIDE.md"
+Releases = "https://github.com/tbelz/netops-api-navigator/releases"
 Repository = "https://github.com/tbelz/netops-api-navigator"
 Issues = "https://github.com/tbelz/netops-api-navigator/issues"
 
