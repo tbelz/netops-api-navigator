@@ -84,6 +84,11 @@ for freshness. Export diagnostics are retained as Actions artifacts. See the
 
 ## Repository discovery
 
-The README links the PyPI version badge to the package. The repository's About
-website points to PyPI; GitHub Packages does not list external PyPI packages.
-Project metadata links back to documentation, source, issues and releases.
+The README links the PyPI version badge to the package. In GitHub's repository
+About settings (gear icon), set **Website** to
+`https://pypi.org/project/netops-api-navigator/` and add relevant topics such as
+`mcp`, `network-automation`, `aruba-central`, `hpe-greenlake`, `openapi` and `python`.
+These settings require repository administration access; a GitHub App may lack
+that permission even when the user is an administrator. GitHub Packages does
+not list external PyPI packages. Project metadata links back to documentation,
+source, issues and releases.
