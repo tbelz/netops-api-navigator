@@ -28,10 +28,13 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install system dependencies
+      - name: Verify preinstalled build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake
+          # GitHub's Ubuntu image already includes these tools. Reinstalling
+          # CMake through apt adds an unrelated mirror outage to every build.
+          cmake --version
+          g++ --version
+          make --version
 
       - name: Install dependencies
         run: uv sync --frozen --no-dev --extra compiler
