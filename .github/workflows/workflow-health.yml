@@ -1,0 +1,40 @@
+name: Workflow Health
+
+on:
+  workflow_run:
+    workflows: [Build and Push Container Image, Python Package, Tests, Update Knowledge Database]
+    types: [completed]
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: workflow-health
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    # Never execute PR code in this privileged workflow_run context.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Check workflows, refresh cadence and published data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERT_ASSIGNEE: ${{ vars.WORKFLOW_ALERT_ASSIGNEE || github.repository_owner }}
+        run: uv run --no-project python scripts/monitor_workflow_health.py

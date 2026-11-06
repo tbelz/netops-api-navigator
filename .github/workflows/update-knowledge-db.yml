@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: write          # Needed for creating releases
-  issues: write            # Needed for knowledge-sync alert issues
 
 jobs:
   build-knowledge-db:
@@ -112,7 +111,9 @@ jobs:
             tar czf build/vsg-cache.tar.gz -C build/spec_cache vsg
             echo "Packed VSG cache: $(stat -c%s build/vsg-cache.tar.gz) bytes"
           else
-            echo "No VSG cache to pack."
+            mkdir -p build/spec_cache/vsg
+            tar czf build/vsg-cache.tar.gz -C build/spec_cache vsg
+            echo "No VSG cache available; health monitor will report degraded documentation."
           fi
 
       - name: Tar Central spec cache for test fixtures
@@ -130,6 +131,15 @@ jobs:
           COUNT=$(find build/spec_cache/central -name '*.json' | wc -l)
           echo "Packed Central spec cache: ${COUNT} spec files, $(stat -c%s build/central-spec-cache.tar.gz) bytes"
 
+      - name: Retain knowledge health diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-health-diagnostics
+          path: build/manifest.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Pass this scrape to the OpenAPI exporter
         uses: actions/upload-artifact@v4
         with:
@@ -140,119 +150,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Ensure alert label exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Idempotently create the label used by the alert step below.
-          # `gh label create` exits non-zero if the label already exists, so
-          # we tolerate that and only fail on other errors.
-          gh label create knowledge-sync-alert \
-            --description "Auto-opened when the daily knowledge sync is degraded" \
-            --color B60205 2>/tmp/label.err || {
-            if grep -qiE "already exists|already in use" /tmp/label.err; then
-              echo "Label already exists — continuing."
-            else
-              cat /tmp/label.err >&2
-              exit 1
-            fi
-          }
-
       - name: Check sync health
         id: health
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NEW_EP=$(jq -r '.endpoint_count // 0' build/manifest.json)
-          echo "new_ep=$NEW_EP" >> "$GITHUB_OUTPUT"
-
-          # A provider is "bad" if it ended in error.  "degraded" is allowed
-          # because it still publishes useful data (e.g. partial coverage,
-          # WAF block on optional VSG docs).
-          BAD=$(jq -r '[.sync_health // {} | to_entries[] | select(.value.status == "error")] | length' build/manifest.json)
-          DEGRADED=$(jq -r '[.sync_health // {} | to_entries[] | select(.value.status == "degraded")] | length' build/manifest.json)
-          DEGRADED_NAMES=$(jq -r '[.sync_health // {} | to_entries[] | select(.value.status == "degraded") | .key] | join(", ")' build/manifest.json)
-          echo "Providers in error: $BAD; degraded: $DEGRADED ($DEGRADED_NAMES)"
-
-          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""' 2>/dev/null || true)
-          if [ -z "$PREV" ]; then
-            echo "No previous release — skipping coverage comparison."
-            if [ "$BAD" -gt 0 ]; then
-              echo "healthy=false" >> "$GITHUB_OUTPUT"
-              echo "reason=${BAD} provider(s) errored (see sync_health in manifest)" >> "$GITHUB_OUTPUT"
-            else
-              echo "healthy=true" >> "$GITHUB_OUTPUT"
-            fi
-            exit 0
+          mkdir -p build/previous
+          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""')
+          if [ -n "$PREV" ]; then
+            gh release download "$PREV" --pattern manifest.json --dir build/previous
           fi
-
-          gh release download "$PREV" --pattern manifest.json --dir /tmp/prev 2>/dev/null || {
-            echo "Could not download previous manifest — skipping comparison."
-            if [ "$BAD" -gt 0 ]; then
-              echo "healthy=false" >> "$GITHUB_OUTPUT"
-              echo "reason=${BAD} provider(s) errored (see sync_health in manifest)" >> "$GITHUB_OUTPUT"
-            else
-              echo "healthy=true" >> "$GITHUB_OUTPUT"
-            fi
-            exit 0
-          }
-
-          OLD_EP=$(jq -r '.endpoint_count // 0' /tmp/prev/manifest.json)
-          echo "Previous: ${OLD_EP} endpoints, Current: ${NEW_EP} endpoints"
-
-          # Flag unhealthy if >25% drop OR any provider fully errored
-          if [ "$BAD" -gt 0 ]; then
-            echo "⚠ Provider error detected"
-            echo "healthy=false" >> "$GITHUB_OUTPUT"
-            echo "reason=${BAD} provider(s) errored (see sync_health in manifest)" >> "$GITHUB_OUTPUT"
-          elif [ "$OLD_EP" -gt 0 ] && [ "$NEW_EP" -lt $(( OLD_EP * 75 / 100 )) ]; then
-            echo "⚠ Significant endpoint drop detected (${OLD_EP} → ${NEW_EP})"
-            echo "healthy=false" >> "$GITHUB_OUTPUT"
-            echo "reason=Endpoint count dropped from ${OLD_EP} to ${NEW_EP} (>25% loss)" >> "$GITHUB_OUTPUT"
-          else
-            echo "healthy=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Open knowledge-sync alert issue (if unhealthy)
-        if: steps.health.outputs.healthy == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          EXISTING=$(gh issue list --label knowledge-sync-alert --state open --json number -q '.[0].number' 2>/dev/null || true)
-          if [ -n "$EXISTING" ]; then
-            echo "Open alert issue #${EXISTING} already exists — adding comment."
-            gh issue comment "$EXISTING" --body "Knowledge sync health check failed again on $(date -u +%Y-%m-%dT%H:%M:%SZ).
-
-          **Reason:** ${{ steps.health.outputs.reason }}
-          **Endpoint count:** ${{ steps.health.outputs.new_ep }}
-
-          See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
-          else
-            gh issue create \
-              --title "Knowledge sync degraded: ${{ steps.health.outputs.reason }}" \
-              --label knowledge-sync-alert \
-              --body "The daily knowledge DB build detected a sync health issue.
-
-          **Reason:** ${{ steps.health.outputs.reason }}
-          **Endpoint count:** ${{ steps.health.outputs.new_ep }}
-          **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-          This issue was auto-created. It will be auto-closed when a healthy build succeeds.
-
-          Check \`build/manifest.json\` → \`sync_health\` for per-provider details."
-          fi
-
-      - name: Auto-close knowledge-sync alert issues (if healthy)
-        if: steps.health.outputs.healthy == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh issue list --label knowledge-sync-alert --state open --json number -q '.[].number' 2>/dev/null | while read -r NUM; do
-            if [ -n "$NUM" ]; then
-              gh issue close "$NUM" --comment "Knowledge sync health restored — auto-closing. Endpoint count: ${{ steps.health.outputs.new_ep }}"
-              echo "Closed issue #${NUM}"
-            fi
-          done
+          uv run --no-sync python scripts/check_knowledge_health.py build/manifest.json --previous build/previous/manifest.json
+          echo "healthy=true" >> "$GITHUB_OUTPUT"
 
       - name: Check for changes against latest release
         id: diff
@@ -267,26 +176,26 @@ jobs:
             exit 0
           fi
 
-          gh release download "$PREV" --pattern manifest.json --dir /tmp/prev 2>/dev/null || {
+          gh release download "$PREV" --pattern manifest.json --dir build/previous --clobber 2>/dev/null || {
             echo "Could not download previous manifest — publishing."
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           }
 
-          OLD_EP=$(jq -r '.endpoint_count // 0' /tmp/prev/manifest.json)
+          OLD_EP=$(jq -r '.endpoint_count // 0' build/previous/manifest.json)
           NEW_EP=$(jq -r '.endpoint_count // 0' build/manifest.json)
-          OLD_CAT=$(jq -r '.category_count // 0' /tmp/prev/manifest.json)
+          OLD_CAT=$(jq -r '.category_count // 0' build/previous/manifest.json)
           NEW_CAT=$(jq -r '.category_count // 0' build/manifest.json)
-          OLD_DOC=$(jq -r '.doc_count // 0' /tmp/prev/manifest.json)
+          OLD_DOC=$(jq -r '.doc_count // 0' build/previous/manifest.json)
           NEW_DOC=$(jq -r '.doc_count // 0' build/manifest.json)
-          OLD_CATS=$(jq -r '.categories | sort | join(",")' /tmp/prev/manifest.json)
+          OLD_CATS=$(jq -r '.categories | sort | join(",")' build/previous/manifest.json)
           NEW_CATS=$(jq -r '.categories | sort | join(",")' build/manifest.json)
-          OLD_COMPILER_ID=$(jq -r '.ast.artifact_cache.identity // ""' /tmp/prev/manifest.json)
+          OLD_COMPILER_ID=$(jq -r '.ast.artifact_cache.identity // ""' build/previous/manifest.json)
           NEW_COMPILER_ID=$(jq -r '.ast.artifact_cache.identity // ""' build/manifest.json)
           NEW_EXTERNAL_REFS=$(jq -r '.ast.artifact_cache.external_ref_count // 0' build/manifest.json)
-          OLD_COMPILER=$(jq -c '.compiler_projection // null' /tmp/prev/manifest.json)
+          OLD_COMPILER=$(jq -c '.compiler_projection // null' build/previous/manifest.json)
           NEW_COMPILER=$(jq -c '.compiler_projection // null' build/manifest.json)
-          OLD_PARITY=$(jq -c '.projection_parity // null' /tmp/prev/manifest.json)
+          OLD_PARITY=$(jq -c '.projection_parity // null' build/previous/manifest.json)
           NEW_PARITY=$(jq -c '.projection_parity // null' build/manifest.json)
 
           echo "Previous: ${OLD_EP} endpoints, ${OLD_CAT} categories, ${OLD_DOC} docs"
@@ -329,6 +238,7 @@ jobs:
             build/vsg-cache.tar.gz
             build/central-spec-cache.tar.gz
             build/compiler-task1-cache.json
+          fail_on_unmatched_files: true
           prerelease: false
           make_latest: false
         env:
