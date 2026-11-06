@@ -1,8 +1,10 @@
 # NetOps API Navigator
 
-[![Build](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml)
-[![Python Package](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml/badge.svg)](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml)
-[![Knowledge DB](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml/badge.svg)](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml)
+[![Build](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml)
+[![Python Package](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml)
+[![Knowledge DB](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml)
+[![Tests](https://github.com/tbelz/netops-api-navigator/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/tests.yml)
+[![Workflow Health](https://github.com/tbelz/netops-api-navigator/actions/workflows/workflow-health.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/workflow-health.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 
@@ -23,6 +25,31 @@ schema, CLI/YANG, and topology lookup should use the focused graph aliases
 back to broad `query_graph` Cypher. Compiler artifacts can be enabled for
 provenance and release-health diagnostics, but they are not a separate endpoint
 discovery tool surface.
+
+## Workflow health and notifications
+
+The API schema and knowledge graphs refresh daily at 04:00 UTC. The **Workflow
+Health** badge checks the production workflows above, release completeness,
+compiler coverage, and the checksums/browser access of all three public OpenAPI
+exports. A separate check runs every six hours and alerts if a successful
+refresh or public schema update is more than 36 hours overdue.
+
+Problems create a [health alert issue](https://github.com/tbelz/netops-api-navigator/issues?q=is%3Aissue+is%3Aopen+label%3Aworkflow-health-alert),
+assigned to and mentioning the repository owner (override with the repository
+variable `WORKFLOW_ALERT_ASSIGNEE`). Changed findings and recovery generate
+notifications; unchanged findings do not add repeated comments. Optional VSG
+source failures and compiler/legacy parity gaps are reported even when the API
+release is usable. Incomplete API compilation, provider failures, and major
+endpoint loss fail the Knowledge DB workflow and block publication.
+
+For email delivery, enable **Email** under **Participating, @mentions and custom**
+in [GitHub notification settings](https://github.com/settings/notifications).
+For native workflow alerts also enable **Actions → Email / On GitHub → Only
+notify for failed workflows**. GitHub sends scheduled-workflow notifications to
+the schedule's responsible actor; the assigned health issue explicitly notifies
+the configured maintainer. Account email settings and delivery cannot be
+controlled by a repository workflow. This monitor uses GitHub Actions too, so it
+cannot notify during a GitHub-wide Actions outage.
 
 ## What It Provides
 
