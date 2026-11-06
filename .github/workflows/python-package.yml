@@ -53,7 +53,7 @@ jobs:
           - id: windows-x64
             runner: windows-latest
           - id: macos-arm64
-            runner: macos-14
+            runner: macos-15
           - id: linux-x64
             runner: ubuntu-latest
     runs-on: ${{ matrix.runner }}
@@ -122,7 +122,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-latest, macos-14, ubuntu-latest]
+        runner: [windows-latest, macos-15, ubuntu-latest]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -297,7 +297,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-latest, macos-14, ubuntu-latest]
+        runner: [windows-latest, macos-15, ubuntu-latest]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
