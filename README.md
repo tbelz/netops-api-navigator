@@ -38,9 +38,14 @@ Problems create a [health alert issue](https://github.com/tbelz/netops-api-navig
 assigned to and mentioning the repository owner (override with the repository
 variable `WORKFLOW_ALERT_ASSIGNEE`). Changed findings and recovery generate
 notifications; unchanged findings do not add repeated comments. Optional VSG
-source failures and compiler/legacy parity gaps are reported even when the API
-release is usable. Incomplete API compilation, provider failures, and major
-endpoint loss fail the Knowledge DB workflow and block publication.
+source failures and compiler/legacy parity gaps remain visible in the issue and
+the run summary as non-blocking warnings. They do not fail the monitor or send
+repeated workflow-failure emails. A green **Workflow Health** badge means there
+are no blocking errors; it does not close an issue with outstanding warnings.
+Actual workflow failures, stale or invalid API exports, incomplete compilation,
+and failures of the monitor itself still fail the health check. Incomplete API
+compilation, provider failures, and major endpoint loss also fail the Knowledge
+DB workflow and block publication.
 
 For email delivery, enable **Email** under **Participating, @mentions and custom**
 in [GitHub notification settings](https://github.com/settings/notifications).

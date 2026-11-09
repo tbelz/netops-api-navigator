@@ -88,7 +88,8 @@ def fetch_json(url: str) -> dict:
         return json.load(response)
 
 
-def collect(github: GitHub, now: datetime) -> tuple[list[str], list[str], bool]:
+def collect(github: GitHub, now: datetime) -> tuple[list[str], list[str], list[str], bool]:
+    warnings: list[str] = []
     workflows = {}
     for filename in WORKFLOWS:
         # PR/feature-branch CI must not overwrite production health or gain
@@ -122,8 +123,9 @@ def collect(github: GitHub, now: datetime) -> tuple[list[str], list[str], bool]:
             problems.append(f"Knowledge DB: missing release assets: {', '.join(missing)}")
         if "manifest.json" in assets:
             manifest = fetch_json(assets["manifest.json"]["browser_download_url"])
-            errors, warnings = assess(manifest)
-            problems.extend(errors + warnings)
+            errors, manifest_warnings = assess(manifest)
+            problems.extend(errors)
+            warnings.extend(manifest_warnings)
 
     owner, repository = github.repo.split("/")
     base_url = f"https://{owner}.github.io/{repository}/openapi/latest/"
@@ -140,7 +142,7 @@ def collect(github: GitHub, now: datetime) -> tuple[list[str], list[str], bool]:
     except Exception as error:
         problems.append(f"Public OpenAPI verification failed: {type(error).__name__}")
         print(f"OpenAPI verification details: {error}")
-    return problems, links, pending
+    return problems, warnings, links, pending
 
 
 def reconcile(github: GitHub, problems: list[str], links: list[str], pending: bool,
@@ -186,18 +188,26 @@ def main() -> None:
     github = GitHub(args.repo)
     monitor_url = f"https://github.com/{args.repo}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
     try:
-        problems, links, pending = collect(github, datetime.now(timezone.utc))
+        problems, warnings, links, pending = collect(github, datetime.now(timezone.utc))
     except Exception as error:
         # A broken health check must not close an existing incident.
-        problems, links, pending = [f"Health inspection failed: {type(error).__name__}"], [], True
+        problems, warnings, links, pending = [f"Health inspection failed: {type(error).__name__}"], [], [], True
         print(f"Inspection details: {error}")
-    print(json.dumps({"problems": problems, "links": links, "pending": pending}, indent=2))
+    print(json.dumps({"problems": problems, "warnings": warnings, "links": links, "pending": pending}, indent=2))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as stream:
-            stream.write("## Repository health\n\n" + "\n".join(f"- {item}" for item in (problems or ["All checks passed"])) + "\n\n" + "\n".join(links) + "\n")
+            stream.write("## Repository health\n\n")
+            stream.write("### Errors\n\n" + "\n".join(f"- {item}" for item in (problems or ["None"])) + "\n\n")
+            stream.write("### Warnings (non-blocking)\n\n" + "\n".join(f"- {item}" for item in (warnings or ["None"])) + "\n\n")
+            if pending:
+                stream.write("Some production workflows are still running; incidents will not be closed yet.\n\n")
+            stream.write("\n".join(links) + "\n")
     if not args.dry_run:
-        reconcile(github, problems, links, pending, args.assignee, monitor_url)
+        # Keep warnings visible in the existing incident, using the same
+        # fingerprint to avoid re-notifying unchanged findings. Only errors
+        # fail this run: warning-only failures cause repeated Actions emails.
+        reconcile(github, problems + warnings, links, pending, args.assignee, monitor_url)
     raise SystemExit(bool(problems))
 
 

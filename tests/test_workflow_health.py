@@ -147,10 +147,66 @@ def test_collection_ignores_pr_failures_and_checks_published_content(monkeypatch
     monkeypatch.setattr(monitor, "verify", lambda url, report: verified.append(url))
     assert monitor.collect(github, NOW)[0] == []
     assert verified == ["https://owner.github.io/repo/openapi/latest/"]
+    manifest["sync_health"]["vsg"] = {"status": "degraded", "reason": "access_denied"}
+    manifest["projection_parity"]["all_legacy_effectively_covered"] = False
+    problems, warnings, _, _ = monitor.collect(github, NOW)
+    assert problems == []
+    assert len(warnings) == 2
     report["scraped_at"] = (NOW - timedelta(hours=37)).isoformat()
     assert "Published OpenAPI schema has not been refreshed within 36 hours" in monitor.collect(github, NOW)[0]
     monkeypatch.setattr(monitor, "verify", lambda *_: (_ for _ in ()).throw(ValueError("checksum mismatch")))
     assert "Public OpenAPI verification failed: ValueError" in monitor.collect(github, NOW)[0]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("problems", [[], ["Published OpenAPI schema has not been refreshed within 36 hours"]])
+def test_monitor_exit_status_distinguishes_warnings_from_errors(monkeypatch, tmp_path, dry_run, problems):
+    github = FakeGitHub()
+    warnings = ["vsg: degraded (access_denied)"]
+    # Simulate an existing incident so the warning-only run must neither close
+    # it nor produce another notification just because the run link changed.
+    monitor.reconcile(github, problems + warnings, [], False, "owner", "previous run")
+    github.issues = [{"number": 42, "body": github.calls[-1][2]["body"]}]
+    github.calls.clear()
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(sys, "argv", ["monitor", "--repo", "owner/repo", "--assignee", "owner"] + (["--dry-run"] if dry_run else []))
+    monkeypatch.setattr(monitor, "GitHub", lambda _: github)
+    monkeypatch.setattr(monitor, "collect", lambda *_: (problems, warnings, [], False))
+    with pytest.raises(SystemExit) as stopped:
+        monitor.main()
+    assert stopped.value.code == int(bool(problems))
+    assert not github.calls
+    assert "Warnings (non-blocking)" in summary.read_text()
+    assert warnings[0] in summary.read_text()
+    if problems:
+        assert problems[0] in summary.read_text()
+
+
+def test_inspection_failure_still_fails_and_does_not_close_incident(monkeypatch):
+    github = FakeGitHub([{"number": 42, "body": monitor.MARKER}])
+    monkeypatch.setattr(sys, "argv", ["monitor", "--repo", "owner/repo"])
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(monitor, "GitHub", lambda _: github)
+    def fail(*_):
+        raise TimeoutError("API unavailable")
+    monkeypatch.setattr(monitor, "collect", fail)
+    with pytest.raises(SystemExit) as stopped:
+        monitor.main()
+    assert stopped.value.code == 1
+    assert all(call[2].get("state") != "closed" for call in github.calls)
+    assert "Health inspection failed: TimeoutError" in github.calls[-1][2]["body"]
+
+
+def test_notification_delivery_failure_still_fails_monitor(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["monitor", "--repo", "owner/repo"])
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(monitor, "collect", lambda *_: ([], ["VSG warning"], [], False))
+    def fail(*_):
+        raise RuntimeError("Issue API unavailable")
+    monkeypatch.setattr(monitor, "reconcile", fail)
+    with pytest.raises(RuntimeError, match="Issue API unavailable"):
+        monitor.main()
 
 
 def test_privileged_monitor_uses_only_main_and_health_gates_publication():
