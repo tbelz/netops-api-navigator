@@ -15,7 +15,7 @@ from netops_api_navigator.knowledge_db import select_knowledge_release
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("failure", ["missing", "checksum", "engine", "platform", "load"])
+@pytest.mark.parametrize("failure", ["missing", "checksum", "engine", "engine_load", "platform", "load"])
 def test_bad_extensions_do_not_touch_existing_graph_or_sidecars(tmp_path, monkeypatch, failure):
     from netops_api_navigator import server
     graph = tmp_path / "existing_graph"
@@ -34,6 +34,13 @@ def test_bad_extensions_do_not_touch_existing_graph_or_sidecars(tmp_path, monkey
         (root / key / "libfts.lbug_extension").write_bytes(b"not executable")
     elif failure == "engine":
         monkeypatch.setattr(extensions.lb, "__version__", "0.17.1")
+    elif failure == "engine_load":
+        class BrokenEngine:
+            @property
+            def __version__(self):
+                raise RuntimeError("Could not find lbug C API shared library")
+        monkeypatch.setattr(extensions, "lb", BrokenEngine())
+        monkeypatch.setattr(extensions.platform, "system", lambda: "Windows")
     elif failure == "platform":
         monkeypatch.setattr(extensions, "platform_key", lambda: "unsupported")
     else:
@@ -41,8 +48,10 @@ def test_bad_extensions_do_not_touch_existing_graph_or_sidecars(tmp_path, monkey
                             Mock(side_effect=extensions.ExtensionError("cannot load fts")))
     initialize = Mock(side_effect=AssertionError("must not open persistent graph"))
     monkeypatch.setattr(server, "_initialize_runtime_graph", initialize)
-    with pytest.raises(extensions.ExtensionError):
+    with pytest.raises(extensions.ExtensionError) as error:
         server.create_server(Settings(graph_db_path=graph, knowledge_release_repo=""))
+    if failure == "engine_load":
+        assert "--managed-python --python 3.12" in str(error.value)
     initialize.assert_not_called()
     assert before == {p: hashlib.sha256(p.read_bytes()).digest() for p in files}
 

@@ -38,6 +38,14 @@ The supported bundle targets are Linux x64 and ARM64 with glibc, macOS ARM64
 including musl and Windows ARM64, receive an explicit diagnostic. Adding a target
 requires corresponding pinned binaries and a real native qualification job.
 
+Native Windows installs use uv-managed Python 3.12. The pinned Ladybug wheel
+imports `libssl-3-x64.dll` and `libcrypto-3-x64.dll`; Python.org 3.12.10 supplies
+differently named DLLs and cannot load that wheel. Navigator 0.3.4 makes
+`--managed-python` explicit in native installation, workshop launchers and release
+smoke tests, and reports the reinstall command before opening graph files.
+Version 0.3.3 passed the managed-runtime checks but failed the final PyPI test with
+the runner's Python.org runtime; its GitHub release gate remained closed.
+
 Wheels, source distributions and the workshop archive include all four targets.
 Docker uses the same package resources and installs its dependencies from frozen
 lockfile constraints. A build hook rejects incomplete distributions, including

@@ -34,11 +34,11 @@ before running a newer version against an existing database.
 ### 1. Install and check
 
 ```sh
-uv tool install --python 3.12 --no-build netops-api-navigator
+uv tool install --managed-python --python 3.12 --no-build netops-api-navigator
 netops-api-navigator doctor --skip-credentials
 ```
 
-`uv` can install Python 3.12 if needed. The first check downloads the API knowledge
+`uv` supplies its tested Python 3.12 runtime. The first check downloads the API knowledge
 database from GitHub; allow it to finish before starting your MCP client. A
 successful check reports `"status": "ready"` and `"graph_available": true`.
 No Central account is needed for this first run; leave Central credentials unset.

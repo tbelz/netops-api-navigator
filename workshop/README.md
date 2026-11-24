@@ -34,18 +34,18 @@ Before reusing an existing database with a newer bundle, follow the
 4. Verify the bundled installation and knowledge database before the workshop:
 
    ```text
-   uv tool run --isolated --python 3.12 --no-build --constraints constraints.txt --no-index --find-links wheelhouse --find-links . --from netops-api-navigator netops-api-navigator doctor --profile workshop --knowledge-release-tag knowledge-db-20260907-043531 --knowledge-sha256 c9730faf52ecb99b6409d8777814982d684ffed7c673c4a749842cb520c8a56e --skip-credentials
+   uv tool run --isolated --managed-python --python 3.12 --no-build --constraints constraints.txt --no-index --find-links wheelhouse --find-links . --from netops-api-navigator netops-api-navigator doctor --profile workshop --knowledge-release-tag knowledge-db-20260907-043531 --knowledge-sha256 c9730faf52ecb99b6409d8777814982d684ffed7c673c4a749842cb520c8a56e --skip-credentials
    ```
 
    `--find-links .` selects the project wheel included in the extracted bundle;
    `--no-index` keeps resolution local to that wheel and `wheelhouse`.
    `--isolated` avoids reusing a separately installed Navigator version.
 
-   `uv` installs Python 3.12 in the current user context when necessary. The
+   `uv` installs its tested Python 3.12 runtime in the current user context. The
    server and all Python package dependencies are loaded from this bundle;
    administrator access, WSL, Docker, and PyPI access are not required. The
    initial Python download still requires access to the official uv-managed
-   Python distribution unless Python 3.12 is already installed.
+   Python distribution unless uv-managed Python 3.12 is already installed.
 
 When VS Code asks for the Central API URL, copy the exact Base URL shown in
 **Central → Menu → API Gateway → REST API**. The URL is account/cluster-specific;

@@ -24,6 +24,7 @@
       "args": [
         "tool",
         "run",
+        "--managed-python",
         "--python",
         "3.12",
         "--no-build",
