@@ -22,6 +22,8 @@ jobs:
         with:
           version: "${{ env.UV_VERSION }}"
           enable-cache: true
+      - name: Stage pinned extension bundle
+        run: uv run --no-project python scripts/prepare_extensions.py
       - name: Build wheel and source distribution
         run: uv build
       - name: Export locked runtime constraints
@@ -167,7 +169,7 @@ jobs:
           WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
           uv run --no-project --python 3.12 scripts/smoke_mcp_stdio.py -- uv tool run --isolated --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator --profile workshop
 
-      - name: Verify fresh official FTS and algo extensions with the bundled wheel
+      - name: Verify bundled FTS and algo extensions with the bundled wheel
         shell: bash
         run: |
           ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)

@@ -64,7 +64,7 @@ class Settings:
     glp_included_slugs: str = ""
 
     # GitHub knowledge release selection. An empty tag follows the newest
-    # knowledge-db-* release; a tag pins startup to one immutable snapshot.
+    # knowledge-lbug43-* release (or a legacy snapshot); a tag pins startup to one immutable snapshot.
     knowledge_release_repo: str = DEFAULT_KNOWLEDGE_RELEASE_REPO
     knowledge_release_tag: str = ""
     knowledge_asset_sha256: str = ""

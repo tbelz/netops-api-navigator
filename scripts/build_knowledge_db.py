@@ -24,6 +24,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import ladybug as lb  # noqa: E402
+from netops_api_navigator.extensions import (  # noqa: E402
+    ENGINE_VERSION, EXTENSION_ABI, STORAGE_VERSION, KNOWLEDGE_RELEASE_PREFIX,
+    load_extensions, preflight_extensions,
+)
 
 from netops_api_navigator.compiler.artifact_cache import (  # noqa: E402
     compiler_artifact_identity,
@@ -1185,47 +1189,40 @@ def _populate_seeds(db: lb.Database, seeds_dir: Path) -> int:
 
 def _create_fts_indexes(db: lb.Database) -> int:
     """Create FTS indexes for BM25-ranked search."""
-    conn = lb.Connection(db)
+    with lb.Connection(db) as conn:
+        load_extensions(conn)
 
-    try:
-        conn.execute("INSTALL fts")
-        conn.execute("LOAD EXTENSION fts")
-    except Exception as exc:
-        if "already" not in str(exc).lower():
-            print(f"  ⚠ FTS extension unavailable: {exc}", file=sys.stderr)
-            return 0
+        fts_defs = [
+            ("api_fts", "ApiEndpoint", ["summary", "description", "path", "operationId"]),
+            ("doc_fts", "DocSection", ["title", "content"]),
+            ("script_fts", "Script", ["filename", "description"]),
+            # ``Property.enumValues`` is STRING[]; Kuzu FTS only indexes scalar
+            # string columns, so the array is excluded — enum-value lookup goes
+            # via Cypher (``$val IN p.enumValues``) instead.
+            ("property_fts", "Property", ["name", "description", "yangPath"]),
+            # Data-node indexes are only useful at runtime (nodes populated by seeds),
+            # but we create them at build time so the schema is ready.
+            ("device_fts", "Device", ["name", "serial", "model", "deviceType"]),
+            ("site_fts", "Site", ["name", "address", "city", "country"]),
+            ("config_fts", "ConfigProfile", ["name", "category"]),
+        ]
 
-    fts_defs = [
-        ("api_fts", "ApiEndpoint", ["summary", "description", "path", "operationId"]),
-        ("doc_fts", "DocSection", ["title", "content"]),
-        ("script_fts", "Script", ["filename", "description"]),
-        # ``Property.enumValues`` is STRING[]; Kuzu FTS only indexes scalar
-        # string columns, so the array is excluded — enum-value lookup goes
-        # via Cypher (``$val IN p.enumValues``) instead.
-        ("property_fts", "Property", ["name", "description", "yangPath"]),
-        # Data-node indexes are only useful at runtime (nodes populated by seeds),
-        # but we create them at build time so the schema is ready.
-        ("device_fts", "Device", ["name", "serial", "model", "deviceType"]),
-        ("site_fts", "Site", ["name", "address", "city", "country"]),
-        ("config_fts", "ConfigProfile", ["name", "category"]),
-    ]
-
-    created = 0
-    for idx_name, table, fields in fts_defs:
-        try:
-            conn.execute(f"CALL DROP_FTS_INDEX('{table}', '{idx_name}')")
-        except Exception:
-            pass
-        try:
-            cypher_field_list = ", ".join(f"'{f}'" for f in fields)
-            conn.execute(
-                f"CALL CREATE_FTS_INDEX('{table}', '{idx_name}', [{cypher_field_list}])"
-            )
-            created += 1
-            print(f"    Created {idx_name} on {table}")
-        except Exception as exc:
-            print(f"    ⚠ {idx_name} failed: {exc}", file=sys.stderr)
-    return created
+        created = 0
+        for idx_name, table, fields in fts_defs:
+            try:
+                conn.execute(f"CALL DROP_FTS_INDEX('{table}', '{idx_name}')")
+            except Exception:
+                pass
+            try:
+                cypher_field_list = ", ".join(f"'{f}'" for f in fields)
+                conn.execute(
+                    f"CALL CREATE_FTS_INDEX('{table}', '{idx_name}', [{cypher_field_list}])"
+                )
+                created += 1
+                print(f"    Created {idx_name} on {table}")
+            except Exception as exc:
+                print(f"    ⚠ {idx_name} failed: {exc}", file=sys.stderr)
+        return created
 
 
 def main() -> None:
@@ -1264,6 +1261,7 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    preflight_extensions()
 
     output_dir: Path = args.output_dir.resolve()
     db_path = output_dir / "knowledge_db"
@@ -1489,7 +1487,10 @@ def main() -> None:
 
     # Write manifest.json alongside the DB
     manifest = {
-        "version": time.strftime("knowledge-db-%Y%m%d-%H%M%S", time.gmtime()),
+        "version": KNOWLEDGE_RELEASE_PREFIX + time.strftime("%Y%m%d-%H%M%S", time.gmtime()),
+        "ladybug_version": ENGINE_VERSION,
+        "storage_version": STORAGE_VERSION,
+        "extension_abi": EXTENSION_ABI,
         "schema_version": 10,
         "endpoint_count": endpoint_count,
         "category_count": len(index.categories),

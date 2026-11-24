@@ -36,6 +36,9 @@ jobs:
           g++ --version
           make --version
 
+      - name: Stage pinned extension bundle
+        run: uv run --no-project python scripts/prepare_extensions.py
+
       - name: Install dependencies
         run: uv sync --frozen --no-dev --extra compiler
 
@@ -49,7 +52,7 @@ jobs:
           # provider's stale-cache fallback can serve last-good content
           # when today's fetch is blocked.
           mkdir -p build/spec_cache
-          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""' 2>/dev/null || true)
+          PREV=$(gh release list --limit 100 --json tagName -q '([.[] | select(.tagName | startswith("knowledge-lbug43-"))][0] // [.[] | select(.tagName | startswith("knowledge-db-"))][0]).tagName // ""' 2>/dev/null || true)
           if [ -z "$PREV" ]; then
             echo "No previous release — starting with empty VSG cache."
             exit 0
@@ -67,7 +70,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""' 2>/dev/null || true)
+          PREV=$(gh release list --limit 100 --json tagName -q '([.[] | select(.tagName | startswith("knowledge-lbug43-"))][0] // [.[] | select(.tagName | startswith("knowledge-db-"))][0]).tagName // ""' 2>/dev/null || true)
           if [ -z "$PREV" ]; then
             echo "No previous release — starting with an empty compiler cache."
             exit 0
@@ -83,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p build/compiler_reuse
-          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""' 2>/dev/null || true)
+          PREV=$(gh release list --limit 100 --json tagName -q '([.[] | select(.tagName | startswith("knowledge-lbug43-"))][0] // [.[] | select(.tagName | startswith("knowledge-db-"))][0]).tagName // ""' 2>/dev/null || true)
           if [ -z "$PREV" ]; then
             echo "No previous release — compiler artifacts will be rebuilt."
             exit 0
@@ -159,7 +162,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p build/previous
-          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""')
+          PREV=$(gh release list --limit 100 --json tagName -q '([.[] | select(.tagName | startswith("knowledge-lbug43-"))][0] // [.[] | select(.tagName | startswith("knowledge-db-"))][0]).tagName // ""')
           if [ -n "$PREV" ]; then
             gh release download "$PREV" --pattern manifest.json --dir build/previous
           fi
@@ -172,7 +175,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PREV=$(gh release list --limit 100 --json tagName -q '[.[] | select(.tagName | startswith("knowledge-db-"))][0].tagName // ""' 2>/dev/null || true)
+          PREV=$(gh release list --limit 100 --json tagName -q '([.[] | select(.tagName | startswith("knowledge-lbug43-"))][0] // [.[] | select(.tagName | startswith("knowledge-db-"))][0]).tagName // ""' 2>/dev/null || true)
           if [ -z "$PREV" ]; then
             echo "No previous release found — publishing."
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -222,7 +225,7 @@ jobs:
       - name: Generate release tag
         if: steps.health.outputs.healthy == 'true' && steps.diff.outputs.changed == 'true'
         id: tag
-        run: echo "tag=knowledge-db-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+        run: echo "tag=knowledge-lbug43-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         if: steps.health.outputs.healthy == 'true' && steps.diff.outputs.changed == 'true'

@@ -11,8 +11,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /build
 
 # Copy MCP server source
-COPY pyproject.toml uv.lock* README.md ./
+COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/ ./src/
+COPY scripts/prepare_extensions.py ./scripts/prepare_extensions.py
 
 # Create venv and install all dependencies
 # Override python-preference from pyproject.toml — Docker provides system Python
@@ -21,8 +22,9 @@ RUN uv venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install MCP server (pulls httpx, structlog, mcp, etc.)
-RUN uv pip install .
+# Stage verified resources, then install exactly the lockfile's runtime versions.
+RUN uv run --no-project --python /opt/venv/bin/python scripts/prepare_extensions.py
+RUN UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev --no-editable
 
 # Stage 2: Runtime
 FROM python:3.12-slim

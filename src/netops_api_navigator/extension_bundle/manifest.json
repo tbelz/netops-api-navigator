@@ -1,0 +1,57 @@
+{
+  "engine_version": "0.19.1",
+  "extension_abi": "v0.19.0",
+  "storage_version": 43,
+  "bundle_url": "https://github.com/tbelz/netops-api-navigator/releases/download/ladybug-extensions-v0.19.0-r1/ladybug-extensions-v0.19.0-r1.zip",
+  "platforms": {
+    "linux_amd64": {
+      "fts": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/linux_amd64/fts/libfts.lbug_extension",
+        "size": 2225568,
+        "sha256": "3ae7d7787aca397102e4a30a26ec2824884c3a66a2228c9e6997a9cfbc97a144"
+      },
+      "algo": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/linux_amd64/algo/libalgo.lbug_extension",
+        "size": 720840,
+        "sha256": "ba1881bf0a4a96ebf8f2a016a885bee1d99f8f87bbb356688982172422996a3b"
+      }
+    },
+    "linux_arm64": {
+      "fts": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/linux_arm64/fts/libfts.lbug_extension",
+        "size": 2264720,
+        "sha256": "62b27ab48f033b2e480b10e2466afb9618af6cc2d58680d1f377aa4aae9de2f8"
+      },
+      "algo": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/linux_arm64/algo/libalgo.lbug_extension",
+        "size": 721224,
+        "sha256": "87cafe5e08544e05c6a13963a975bd16cd680ecbc984d97e6f6a5df73ec8f7e2"
+      }
+    },
+    "osx_arm64": {
+      "fts": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/osx_arm64/fts/libfts.lbug_extension",
+        "size": 1562680,
+        "sha256": "83ae4be9fa718577ca971f27ff890b3aea5789c9dd908784e28f52917febbfdb"
+      },
+      "algo": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/osx_arm64/algo/libalgo.lbug_extension",
+        "size": 443944,
+        "sha256": "2a01b816d4eeb5dab78a00a41e5aba4b8732601e3a7f59936f42e9c0c62fe051"
+      }
+    },
+    "win_amd64": {
+      "fts": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/win_amd64/fts/libfts.lbug_extension",
+        "size": 14809088,
+        "sha256": "27adf2ca87ec5a5871a91c3864a3353a7d4aa5808f5729f34a6c21cbb500eaf0"
+      },
+      "algo": {
+        "source_url": "https://extension.ladybugdb.com/v0.19.0/win_amd64/algo/libalgo.lbug_extension",
+        "size": 14264320,
+        "sha256": "703d6b4bb276bdf97f524c6051db772cf629114d4d449256f9bed98fda9ce1fa"
+      }
+    }
+  },
+  "bundle_sha256": "59a7aaaaf3948ba5dc539fef3d89d9423fc05118cd87b85a4e2c62bb0445c27c"
+}

@@ -12,6 +12,7 @@ from typing import Any
 import ladybug as lb
 import structlog
 
+from ..extensions import load_extensions, preflight_extensions
 from .schema import (
     ALTER_ADD_COMPILER_PROJECTION_COLUMNS,
     ALTER_ADD_LAST_SYNCED_AT,
@@ -65,10 +66,17 @@ class GraphManager:
     def initialize(self) -> None:
         """Create (or open) the file-backed database and apply schema DDL."""
         logger.info("graph_init_start", db_path=str(self._db_path))
+        paths = preflight_extensions()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = lb.Database(str(self._db_path))
-        with self._connection() as conn:
-            self._initialize_schema(conn)
+        try:
+            with self._connection() as conn:
+                load_extensions(conn, paths)
+                self._fts_available = True
+                self._initialize_schema(conn)
+        except BaseException:
+            self.close()
+            raise
 
     def _initialize_schema(self, conn: lb.Connection) -> None:
         # Bootstrap: knowledge layer + legacy domain tables
@@ -86,42 +94,6 @@ class GraphManager:
         for stmt in ALTER_ADD_LAST_SYNCED_AT + ALTER_ADD_COMPILER_PROJECTION_COLUMNS:
             _execute_idempotent_alter(conn, stmt)
 
-        # Load the algo extension
-        try:
-            conn.execute("INSTALL algo")
-            conn.execute("LOAD EXTENSION algo")
-        except Exception as exc:
-            msg = str(exc)
-            lower_msg = msg.lower()
-            if "already installed" in lower_msg or "already loaded" in lower_msg:
-                logger.debug("algo_extension_already_loaded", error=msg)
-            else:
-                logger.warning(
-                    "algo_extension_load_failed",
-                    reason="failed to install or load algo extension",
-                    error=msg,
-                    exc_info=True,
-                )
-
-        # Load the FTS extension (graceful degradation if unavailable)
-        try:
-            conn.execute("INSTALL fts")
-            conn.execute("LOAD EXTENSION fts")
-            self._fts_available = True
-            logger.info("fts_extension_loaded")
-        except Exception as exc:
-            msg = str(exc)
-            lower_msg = msg.lower()
-            if "already installed" in lower_msg or "already loaded" in lower_msg:
-                self._fts_available = True
-                logger.debug("fts_extension_already_loaded", error=msg)
-            else:
-                self._fts_available = False
-                logger.warning(
-                    "fts_extension_load_failed",
-                    reason="FTS unavailable — search will fall back to CONTAINS",
-                    error=msg,
-                )
         logger.info(
             "graph_schema_created",
             node_tables=len(NODE_TABLES),
