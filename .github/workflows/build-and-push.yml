@@ -146,47 +146,10 @@ jobs:
             fi
           done
 
-      - name: Pull and verify image starts
+      - name: Verify offline extensions and MCP handshake
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
-          docker pull "$IMAGE"
-          
-          # Verify the image can start and respond to MCP initialize
-          echo '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}' | \
-            timeout 30 docker run -i --rm "$IMAGE" | head -1 | python3 -c "
-          import sys, json
-          resp = json.loads(sys.stdin.readline())
-          assert resp.get('result', {}).get('serverInfo', {}).get('name') == 'netops-api-navigator', f'Unexpected response: {resp}'
-          print('✅ MCP server responded correctly')
-          " || echo "⚠️ MCP handshake verification could not complete (may be expected without credentials)"
-
-      - name: Verify tools are registered
-        run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
-          
-          # Send initialize + tools/list
-          (echo '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}'; \
-           echo '{"jsonrpc":"2.0","method":"notifications/initialized"}'; \
-           echo '{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}'; \
-           sleep 5) | \
-            timeout 30 docker run -i --rm "$IMAGE" 2>/dev/null | while read -r line; do
-              echo "$line" | python3 -c "
-          import sys, json
-          try:
-              resp = json.loads(sys.stdin.readline())
-              if resp.get('id') == 2:
-                  tools = [t['name'] for t in resp.get('result', {}).get('tools', [])]
-                  print(f'Registered tools: {tools}')
-                  expected = {'list_scripts', 'get_script_content', 'save_script', 'execute_script', 'call_central_api', 'call_greenlake_api', 'query_graph', 'write_graph'}
-                  missing = expected - set(tools)
-                  if missing:
-                      print(f'❌ Missing tools: {missing}')
-                      sys.exit(1)
-                  print('✅ All expected tools registered')
-          except json.JSONDecodeError:
-              pass
-          " 2>/dev/null && break
-          done
+          python3 scripts/smoke_docker_extensions.py "$IMAGE"
 
       - name: Verify v2 compiler smoke profile starts from release artifacts
         run: |

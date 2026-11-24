@@ -31,8 +31,10 @@ with urllib.request.urlopen(
     releases = json.load(response)
     release = next(
         item
+        for prefix in ("knowledge-lbug43-", "knowledge-db-")
         for item in releases
-        if str(item.get("tag_name", "")).startswith("knowledge-db-")
+        if str(item.get("tag_name", "")).startswith(prefix)
+        and not item.get("draft") and not item.get("prerelease")
     )
     print(release["tag_name"])
 PY

@@ -1,6 +1,6 @@
 [project]
 name = "netops-api-navigator"
-version = "0.3.2"
+version = "0.3.3"
 description = "Independent MCP server for graph-backed network API discovery and automation"
 readme = "README.md"
 license = { text = "MIT" }
@@ -17,7 +17,7 @@ dependencies = [
     "mcp>=1.26.0,<2",
     "structlog>=24.0",
     "httpx>=0.27",
-    "ladybug==0.17.1",
+    "ladybug==0.19.1",
     "networkx>=3.0",
     "platformdirs>=4.3",
 ]
@@ -48,10 +48,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/netops_api_navigator"]
-artifacts = ["src/netops_api_navigator/seeds/*.json"]
+artifacts = ["src/netops_api_navigator/seeds/*.json", "src/netops_api_navigator/extension_bundle/**"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/netops_api_navigator"]
+include = ["src/netops_api_navigator", "hatch_build.py"]
+artifacts = ["src/netops_api_navigator/extension_bundle/**"]
+
+[tool.hatch.build.hooks.custom]
 
 [tool.uv]
 python-preference = "only-managed"

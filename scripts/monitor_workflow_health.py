@@ -112,7 +112,7 @@ def collect(github: GitHub, now: datetime) -> tuple[list[str], list[str], list[s
             problems.append(f"{WORKFLOWS[filename]}: workflow is disabled")
 
     release = next((item for item in github.pages("releases")
-                    if item["tag_name"].startswith("knowledge-db-") and not item["draft"] and not item["prerelease"]), None)
+                    if item["tag_name"].startswith(("knowledge-lbug43-", "knowledge-db-")) and not item["draft"] and not item["prerelease"]), None)
     if release is None:
         problems.append("Knowledge DB: no published release found")
     else:

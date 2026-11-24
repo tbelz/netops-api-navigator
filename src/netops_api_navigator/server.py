@@ -23,6 +23,7 @@ from . import __version__
 from .api_tree import render_path_tree
 from .central_client import CentralAPIError, CentralClient, GreenLakeClient
 from .config import Settings, load_settings
+from .extensions import extension_diagnostics, preflight_extensions
 from .graph import GraphManager
 from .graph.ipc_server import GraphIPCServer
 from .instructions import build_instructions
@@ -450,6 +451,7 @@ def create_server(
 ) -> ServerRuntime:
     """Build one configured server without import-time side effects."""
     settings = settings or load_settings()
+    preflight_extensions()
     client, offline_mode = _create_central_client(
         settings, validate_credentials=validate_credentials
     )
@@ -666,6 +668,7 @@ def run_doctor(settings: Settings, *, skip_credentials: bool) -> int:
     try:
         if sys.version_info < (3, 12):
             raise StartupError("Python 3.12 or newer is required")
+        result["extensions"] = extension_diagnostics()
         runtime = create_server(
             settings,
             validate_credentials=not skip_credentials,
@@ -675,6 +678,7 @@ def run_doctor(settings: Settings, *, skip_credentials: bool) -> int:
             {
                 "status": "ready",
                 "graph_available": runtime.graph_manager.is_available,
+                "extensions_verified": True,
                 "knowledge_release_tag": _local_knowledge_tag(settings),
                 "tool_count": len(runtime.mcp._tool_manager._tools),
             }
