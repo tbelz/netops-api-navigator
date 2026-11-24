@@ -1,0 +1,41 @@
+name: Windows Ladybug qualification
+
+on:
+  push:
+    branches: [codex/windows-release-smoke]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-preference: [system, only-managed]
+    runs-on: windows-latest
+    env:
+      UV_PYTHON_PREFERENCE: ${{ matrix.python-preference }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.24"
+          python-version: "3.12"
+      - name: Expose the native engine import error
+        shell: bash
+        run: |
+          uv run --no-project --python 3.12 --no-build --with netops-api-navigator==0.3.3 python - <<'PY'
+          import importlib, importlib.metadata, pathlib, platform, sys
+          print('Python:', sys.version, sys.executable, flush=True)
+          print('Platform:', platform.platform(), flush=True)
+          print('Engine package:', importlib.metadata.version('ladybug'), flush=True)
+          import ladybug
+          print('Engine files:', sorted(p.name for p in pathlib.Path(ladybug.__file__).parent.iterdir()), flush=True)
+          native = importlib.import_module('ladybug._lbug')
+          print('Native module:', native.__file__, flush=True)
+          print('Engine:', ladybug.__version__, flush=True)
+          from netops_api_navigator.extensions import preflight_extensions
+          preflight_extensions()
+          print('Bundled extensions: passed', flush=True)
+          PY
