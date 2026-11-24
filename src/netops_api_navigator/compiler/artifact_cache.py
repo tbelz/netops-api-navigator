@@ -8,9 +8,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..extensions import ENGINE_VERSION, EXTENSION_ABI, STORAGE_VERSION
 from .frontend import clean_spec
 
-_ARTIFACT_CACHE_VERSION = 1
+_ARTIFACT_CACHE_VERSION = 2
 
 
 def compiler_artifact_identity(
@@ -21,10 +22,15 @@ def compiler_artifact_identity(
     """Return the exact corpus and implementation identity for compiler output."""
     corpus = _corpus_fingerprint(specs)
     implementation = _implementation_fingerprint(repo_root)
-    identity = hashlib.sha256(f"{corpus}:{implementation}".encode()).hexdigest()
+    identity = hashlib.sha256(
+        f"{corpus}:{implementation}:{ENGINE_VERSION}:{EXTENSION_ABI}:{STORAGE_VERSION}".encode()
+    ).hexdigest()
     external_ref_count = sum(_external_ref_count(spec) for spec in specs)
     return {
         "version": _ARTIFACT_CACHE_VERSION,
+        "engine_version": ENGINE_VERSION,
+        "extension_abi": EXTENSION_ABI,
+        "storage_version": STORAGE_VERSION,
         "identity": identity,
         "corpus_fingerprint": corpus,
         "implementation_fingerprint": implementation,

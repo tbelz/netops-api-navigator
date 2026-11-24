@@ -21,7 +21,23 @@ from urllib.parse import quote
 
 import httpx
 
+from .extensions import KNOWLEDGE_RELEASE_PREFIX, STORAGE_VERSION
+
 _DEFAULT_LOGGER = logging.getLogger("netops_api_navigator.knowledge_db")
+
+
+def select_knowledge_release(releases: list[dict]) -> dict | None:
+    """Prefer storage-43 snapshots, retaining legacy bootstrap compatibility.
+
+    The new prefix deliberately does not start with knowledge-db-: old clients
+    must never discover and open a database that their engine cannot read.
+    """
+    for prefix in (KNOWLEDGE_RELEASE_PREFIX, "knowledge-db-"):
+        for release in releases:
+            if (str(release.get("tag_name", "")).startswith(prefix)
+                    and not release.get("draft") and not release.get("prerelease")):
+                return release
+    return None
 
 # How long to wait for the GitHub release-info API call. Kept short so a
 # spotty network does not eat the MCP client's ``initialize`` budget on
@@ -204,16 +220,9 @@ def download_knowledge_db(
         if release_tag:
             release = payload
         elif isinstance(payload, list):
-            release = next(
-                (
-                    item
-                    for item in payload
-                    if str(item.get("tag_name", "")).startswith("knowledge-db-")
-                ),
-                None,
-            )
+            release = select_knowledge_release(payload)
             if release is None:
-                _warn("knowledge_db_release_missing", prefix="knowledge-db-")
+                _warn("knowledge_db_release_missing", prefix=KNOWLEDGE_RELEASE_PREFIX)
                 return False
         else:
             # Backward-compatible with older mocked callers and GitHub API
@@ -314,6 +323,19 @@ def download_knowledge_db(
                     reason=f"{archive_member} not found in archive",
                 )
                 return False
+
+            # Read only the file header, before installing or opening a graph.
+            # Legacy directory artifacts remain supported; the engine validates
+            # their layout when opened. Never replace local state with a newer
+            # storage format that this runtime cannot read.
+            if extracted_db.is_file():
+                with extracted_db.open("rb") as handle:
+                    header = handle.read(12)
+                if header[:4] == b"LBUG" and (
+                    len(header) != 12
+                    or int.from_bytes(header[4:12], "little") not in (40, 41, 42, STORAGE_VERSION)
+                ):
+                    raise ValueError("Knowledge artifact has an unsupported Ladybug storage version")
 
             extracted_manifest = Path(tmp) / "manifest.json"
             if not extracted_manifest.exists():

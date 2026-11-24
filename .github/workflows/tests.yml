@@ -29,6 +29,9 @@ jobs:
       - name: Install uv
         run: pip install uv
 
+      - name: Stage pinned extension bundle
+        run: uv run --no-project python scripts/prepare_extensions.py
+
       - name: Install dependencies
         run: uv sync --frozen --extra test
 
@@ -41,7 +44,11 @@ jobs:
           CENTRAL_CLIENT_SECRET: ""
 
   docker-v2-smoke:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
 
     steps:
@@ -49,6 +56,9 @@ jobs:
 
       - name: Build local Docker image
         run: docker build -t netops-api-navigator:ci .
+
+      - name: Verify bundled extensions with networking disabled
+        run: python3 scripts/smoke_docker_extensions.py netops-api-navigator:ci
 
       - name: Run v2 compiler smoke profile
         run: bash scripts/ci_docker_v2_smoke.sh netops-api-navigator:ci "${{ github.repository }}"

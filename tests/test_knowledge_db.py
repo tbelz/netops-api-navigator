@@ -87,6 +87,19 @@ def test_returns_false_when_repo_empty(tmp_path):
     assert download_knowledge_db("", tmp_path / "kdb") is False
 
 
+def test_newer_storage_artifact_cannot_replace_local_graph(tmp_path, monkeypatch):
+    graph = tmp_path / "graph"
+    graph.write_bytes(b"existing local data")
+    tarball = _make_tarball({"knowledge_db": b"LBUG" + (44).to_bytes(8, "little")})
+    def handler(request):
+        if "api.github.com" in str(request.url):
+            return httpx.Response(200, json=_release_payload())
+        return httpx.Response(200, content=tarball)
+    _install_transport(monkeypatch, handler)
+    assert not download_knowledge_db("owner/repo", graph, force=True)
+    assert graph.read_bytes() == b"existing local data"
+
+
 def test_invalid_explicit_digest_fails_before_network(tmp_path, monkeypatch):
     def unexpected_get(*args, **kwargs):
         raise AssertionError("invalid digest must fail before a network request")

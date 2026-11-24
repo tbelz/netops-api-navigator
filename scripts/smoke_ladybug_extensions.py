@@ -1,4 +1,4 @@
-"""Exercise official extensions with an empty cache and a disposable database."""
+"""Exercise bundled extensions with an empty cache and a disposable database."""
 from __future__ import annotations
 
 import argparse
@@ -6,18 +6,18 @@ import json
 from pathlib import Path
 
 import ladybug as lb
+from netops_api_navigator.extensions import load_extensions, preflight_extensions
 
 
 def smoke(directory: Path) -> None:
+    paths = preflight_extensions()
     directory.mkdir(parents=True, exist_ok=False)
     for iteration in range(2):
         db = lb.Database(str(directory / 'graph'), buffer_pool_size=64 * 1024 * 1024)
         conn = lb.Connection(db)
         try:
             conn.execute(f'CALL home_directory={json.dumps(directory.resolve().as_posix())}').close()
-            for extension in ('fts', 'algo'):
-                conn.execute(f'INSTALL {extension}').close()
-                conn.execute(f'LOAD EXTENSION {extension}').close()
+            load_extensions(conn, paths)
             if iteration == 0:
                 conn.execute('CREATE NODE TABLE Probe(id INT64, text STRING, PRIMARY KEY(id))').close()
                 conn.execute('CREATE REL TABLE Edge(FROM Probe TO Probe)').close()

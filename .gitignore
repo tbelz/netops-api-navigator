@@ -65,3 +65,6 @@ src/netops_api_navigator/populate_monitoring.*
 
 # Claude local config
 .claude/
+
+# Verified release resources staged by scripts/prepare_extensions.py
+src/netops_api_navigator/extension_bundle/*/*.lbug_extension
