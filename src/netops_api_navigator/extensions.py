@@ -43,10 +43,25 @@ def _error(extension: str, reason: str) -> ExtensionError:
     )
 
 
+def _engine_version() -> str:
+    try:
+        return lb.__version__
+    except (ImportError, OSError, RuntimeError) as exc:
+        repair = ""
+        if platform.system() == "Windows":
+            repair = (
+                " The Windows engine requires the OpenSSL libraries supplied by "
+                "uv-managed Python. Reinstall with 'uv tool install --reinstall "
+                "--managed-python --python 3.12 --no-build netops-api-navigator'."
+            )
+        raise _error("engine", f"native library could not load: {exc}.{repair}") from exc
+
+
 def verify_extensions() -> tuple[Path, ...]:
     """Check every required binary before loading any executable code."""
-    if lb.__version__ != ENGINE_VERSION:
-        raise _error("engine", f"installed version is {lb.__version__}")
+    installed_version = _engine_version()
+    if installed_version != ENGINE_VERSION:
+        raise _error("engine", f"installed version is {installed_version}")
     try:
         manifest = json.loads((_ROOT / "manifest.json").read_text(encoding="utf-8"))
         if (manifest["engine_version"], manifest["extension_abi"]) != (
@@ -93,6 +108,6 @@ def preflight_extensions() -> tuple[Path, ...]:
 
 
 def extension_diagnostics() -> dict:
-    return {"engine": lb.__version__, "expected_engine": ENGINE_VERSION,
+    return {"engine": _engine_version(), "expected_engine": ENGINE_VERSION,
             "extension_abi": EXTENSION_ABI, "platform": platform_key(),
             "source": "bundled", "required": list(_REQUIRED)}

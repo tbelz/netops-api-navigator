@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p wheelhouse
-          uv run --no-project --python 3.12 --with pip python -m pip download --only-binary=:all: --dest wheelhouse --requirement dist/constraints.txt
+          uv run --no-project --managed-python --python 3.12 --with pip python -m pip download --only-binary=:all: --dest wheelhouse --requirement dist/constraints.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: workshop-wheelhouse-${{ matrix.id }}
@@ -142,7 +142,7 @@ jobs:
         run: |
           BUNDLE=$(find dist -maxdepth 1 -name '*-workshop-v*.zip' -print -quit)
           test -n "$BUNDLE"
-          uv run --no-project --python 3.12 python -m zipfile -e "$BUNDLE" workshop-extracted
+          uv run --no-project --managed-python --python 3.12 python -m zipfile -e "$BUNDLE" workshop-extracted
       - name: Diagnose exact bundled wheel without an index or source builds
         shell: bash
         env:
@@ -155,7 +155,7 @@ jobs:
           ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)
           WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
           test -n "$WHEEL"
-          uv tool run --isolated --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator doctor --profile workshop --skip-credentials
+          uv tool run --isolated --managed-python --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator doctor --profile workshop --skip-credentials
       - name: Verify MCP stdio handshake and workshop tool surface
         shell: bash
         env:
@@ -167,7 +167,7 @@ jobs:
         run: |
           ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)
           WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
-          uv run --no-project --python 3.12 scripts/smoke_mcp_stdio.py -- uv tool run --isolated --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator --profile workshop
+          uv run --no-project --managed-python --python 3.12 scripts/smoke_mcp_stdio.py -- uv tool run --isolated --managed-python --python 3.12 --no-build --constraints "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --from "$WHEEL" netops-api-navigator --profile workshop
 
       - name: Verify bundled FTS and algo extensions with the bundled wheel
         shell: bash
@@ -175,7 +175,7 @@ jobs:
           ROOT=$(find workshop-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)
           WHEEL=$(find "$ROOT" -maxdepth 1 -name '*.whl' -print -quit)
           mkdir -p tmp
-          uv run --no-project --python 3.12 --no-build --with-requirements "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --with "$WHEEL" python scripts/smoke_ladybug_extensions.py --directory tmp/extension-smoke
+          uv run --no-project --managed-python --python 3.12 --no-build --with-requirements "$ROOT/constraints.txt" --no-index --find-links "$ROOT/wheelhouse" --with "$WHEEL" python scripts/smoke_ladybug_extensions.py --directory tmp/extension-smoke
 
   publish-testpypi:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -241,7 +241,7 @@ jobs:
           SCRIPT_LIBRARY_PATH: ${{ runner.temp }}/netops-api-navigator/scripts
           SPEC_CACHE_DIR: ${{ runner.temp }}/netops-api-navigator/cache
         run: >-
-          uv tool run --isolated --python 3.12 --no-build
+          uv tool run --isolated --managed-python --python 3.12 --no-build
           --constraints dist/constraints.txt
           --from "${{ steps.verify.outputs.wheel_url }}"
           netops-api-navigator doctor --profile workshop --skip-credentials
@@ -318,7 +318,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           for ATTEMPT in {1..12}; do
-            if uv tool run --isolated --python 3.12 --no-build --from "${PROJECT_NAME}==${VERSION}" netops-api-navigator doctor --profile workshop --skip-credentials; then
+            if uv tool run --isolated --managed-python --python 3.12 --no-build --from "${PROJECT_NAME}==${VERSION}" netops-api-navigator doctor --profile workshop --skip-credentials; then
               exit 0
             fi
             if [ "$ATTEMPT" -lt 12 ]; then

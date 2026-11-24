@@ -10,8 +10,9 @@ Docker, and startup problems.
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then follow
 the quickstart. The native package targets Windows x64, macOS 15+ on Apple Silicon,
-and Linux x64/ARM64 with glibc. Python 3.12 can be supplied by uv; no repository
-checkout is required.
+and Linux x64/ARM64 with glibc. Use uv-managed Python 3.12 as selected by the
+quickstart's `--managed-python` flag; no repository checkout is required. On Windows,
+the pinned engine needs the OpenSSL libraries included in that Python distribution.
 
 The install command selects the current PyPI release. To reproduce a particular
 release, append `==VERSION` to the package name using a version listed in
@@ -207,6 +208,7 @@ each client after switching. For independent graphs, give each process a separat
 | Symptom | Next step |
 |---|---|
 | Executable not found | Run `uv tool update-shell`, reopen the terminal/client, or set the client's `command` to the executable's absolute path. `uv tool dir --bin` shows its directory. |
+| Windows reports a missing Ladybug C API library | Reinstall with `uv tool install --reinstall --managed-python --python 3.12 --no-build netops-api-navigator`, then run doctor. The Python.org runtime has different OpenSSL DLL names. |
 | `doctor` reports an extension error | Check the [extension and upgrade guide](ladybug-extension-upgrade.md). This is an engine/install failure, not a Central credential error. Include the engine version and sanitized diagnostic in an issue. |
 | First start cannot obtain a knowledge database | Check GitHub access and the configured release/digest. Run `doctor --skip-credentials` outside the MCP client to see the error. |
 | Partial Central credentials | Supply all three Central variables, or unset all three for discovery mode. |
