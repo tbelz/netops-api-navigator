@@ -59,5 +59,13 @@ CI (`.github/workflows/tests.yml`) still runs the full suite on every
 PR. The local loop is for tightening agent iteration, not for replacing
 the gate.
 
+## Documentation
+
+- Keep README.md focused on purpose, quickstart, and navigation. Add sections only when explicitly requested.
+- Update existing README text when entry-level behavior changes; do not append feature notes, bugfix histories, or maintainer details.
+- Put details in the relevant docs/ page; update existing coverage and link instead of duplicating it.
+- Verify documentation against code and release availability; update affected docs with behavior changes.
+- Keep comments focused on intent, constraints, and non-obvious behavior; remove stale explanations and avoid change logs.
+
 
   Don't add anything to AGENTS.md except when I explicitly tell you!

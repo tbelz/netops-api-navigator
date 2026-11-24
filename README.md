@@ -1,597 +1,115 @@
 # NetOps API Navigator
 
-[![Build](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/build-and-push.yml)
-[![Python Package](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/python-package.yml)
-[![Knowledge DB](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/update-knowledge-db.yml)
-[![Tests](https://github.com/tbelz/netops-api-navigator/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/tests.yml)
-[![Workflow Health](https://github.com/tbelz/netops-api-navigator/actions/workflows/workflow-health.yml/badge.svg?branch=main)](https://github.com/tbelz/netops-api-navigator/actions/workflows/workflow-health.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
+An MCP server that connects your AI assistant to **HPE Aruba Networking Central**
+and the **HPE GreenLake Platform**. Explore APIs, inspect your network, and build
+reusable automation from your MCP client.
 
-MCP server for **HPE Aruba Networking Central** and the **HPE GreenLake Platform**.
-It gives an MCP client a graph-backed API catalog, live Central/GreenLake API
-calls when credentials are configured, and a reusable Python script library for
-network automation workflows.
+Independent community project; not affiliated with, endorsed by, or supported by
+Hewlett Packard Enterprise.
 
-> [!IMPORTANT]
-> NetOps API Navigator is an independent community project. It is not affiliated
-> with, sponsored by, endorsed by, or supported by Hewlett Packard Enterprise.
-> HPE Aruba Networking Central and HPE GreenLake Platform are referenced solely
-> to describe compatibility. All trademarks belong to their respective owners.
+## What you can do
 
-The current agent-facing discovery surface is graph-first. Routine endpoint,
-schema, CLI/YANG, and topology lookup should use the focused graph aliases
-(`query_fts`, `query_api_schema`, `query_yang`, `query_topology`) before falling
-back to broad `query_graph` Cypher. Compiler artifacts can be enabled for
-provenance and release-health diagnostics, but they are not a separate endpoint
-discovery tool surface.
+- **Find the right API:** search endpoints and inspect parameters, payloads, and
+  relationships between API schemas, YANG paths, and CLI commands.
+- **Query your network:** use authenticated Central and GreenLake API calls with
+  validation against the API catalog.
+- **Explore topology:** inspect sites, devices, groups, and links populated from
+  your Central environment.
+- **Reuse automation:** save Python scripts and, in connected mode, run them with
+  authenticated API helpers.
 
-## Workflow health and notifications
+API discovery works without Central credentials. Live requests, topology
+synchronization, and script execution require a connection to your environment.
 
-The API schema and knowledge graphs refresh daily at 04:00 UTC. The **Workflow
-Health** badge checks the production workflows above, release completeness,
-compiler coverage, and the checksums/browser access of all three public OpenAPI
-exports. A separate check runs every six hours and alerts if a successful
-refresh or public schema update is more than 36 hours overdue.
+## Quickstart
 
-Problems create a [health alert issue](https://github.com/tbelz/netops-api-navigator/issues?q=is%3Aissue+is%3Aopen+label%3Aworkflow-health-alert),
-assigned to and mentioning the repository owner (override with the repository
-variable `WORKFLOW_ALERT_ASSIGNEE`). Changed findings and recovery generate
-notifications; unchanged findings do not add repeated comments. Optional VSG
-source failures and compiler/legacy parity gaps remain visible in the issue and
-the run summary as non-blocking warnings. They do not fail the monitor or send
-repeated workflow-failure emails. A green **Workflow Health** badge means there
-are no blocking errors; it does not close an issue with outstanding warnings.
-Actual workflow failures, stale or invalid API exports, incomplete compilation,
-and failures of the monitor itself still fail the health check. Incomplete API
-compilation, provider failures, and major endpoint loss also fail the Knowledge
-DB workflow and block publication.
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/) and an MCP
+client that can run a local stdio server. The native installation targets Windows
+x64, macOS 15+ on Apple Silicon, and Linux x64/ARM64 with glibc.
+Docker and WSL are not required.
 
-For email delivery, enable **Email** under **Participating, @mentions and custom**
-in [GitHub notification settings](https://github.com/settings/notifications).
-For native workflow alerts also enable **Actions → Email / On GitHub → Only
-notify for failed workflows**. GitHub sends scheduled-workflow notifications to
-the schedule's responsible actor; the assigned health issue explicitly notifies
-the configured maintainer. Account email settings and delivery cannot be
-controlled by a repository workflow. This monitor uses GitHub Actions too, so it
-cannot notify during a GitHub-wide Actions outage.
+Already using Navigator? Read the [upgrade instructions](docs/ladybug-extension-upgrade.md#required-deployment-and-rollback-procedure)
+before running a newer version against an existing database.
 
-## What It Provides
+### 1. Install and check
 
-- OpenAPI discovery for Central and GreenLake from a pre-built LadybugDB graph.
-- Focused Cypher tools for API/schema traversal, full-text search, topology, and
-  YANG/CLI reverse lookup.
-- Authenticated Central and GreenLake API tools in connected mode.
-- Stateless pre-flight API validation against the graph before live API calls.
-- A script library with seed scripts, editable saved scripts, and optional
-  execution with `central_helpers` injected.
-- Discovery-only and read-only modes for safer review and audit workflows.
-- Optional compiler/v2 projection support for smoke testing, provenance, and
-  graph-health diagnostics.
-- Optional runtime-hydration foundation for graph-backed planning of future
-  live-state observations.
-
-## Architecture
-
-```text
-MCP client
-  |
-  | stdio JSON-RPC
-  v
-FastMCP server
-  |
-  |-- graph tools
-  |     query_fts, query_api_schema, query_yang, query_topology
-  |     query_graph, write_graph, get_raw_schema
-  |
-  |-- live API tools, only with credentials
-  |     call_central_api, call_greenlake_api
-  |
-  |-- script tools
-  |     list_scripts, get_script_content, save_script
-  |     execute_script, only with credentials
-  |
-  |-- optional compiler tools
-  |     get_openapi_source_detail, get_compiler_graph_health
-  |
-  |-- optional runtime hydration tools
-  |     get_runtime_hydration_status, list_runtime_hydration_candidates
-  |
-  |-- resources
-        api://endpoint-catalog, docs://endpoint-catalog
-        graph://schema, graph://seed-status
-        docs://central/overview, docs://script-writing-guide
-        docs://config-workflows, docs://vsg/list, docs://vsg/{section_id}
-        script://seeds
+```sh
+uv tool install --python 3.12 --no-build netops-api-navigator
+netops-api-navigator doctor --skip-credentials
 ```
 
-The graph has three main layers:
+`uv` can install Python 3.12 if needed. The first check downloads the API knowledge
+database from GitHub; allow it to finish before starting your MCP client. A
+successful check reports `"status": "ready"` and `"graph_available": true`.
+No Central account is needed for this first run; leave Central credentials unset.
 
-- Knowledge layer: build-time API and documentation graph nodes such as
-  `ApiEndpoint`, `Parameter`, `RequestBody`, `Response`, `SchemaComponent`,
-  `Property`, `YangPath`, `CliCommand`, `DocSection`, and `Script`.
-- Domain layer: runtime network state such as `Org`, `SiteCollection`, `Site`,
-  `Device`, `DeviceGroup`, and topology edges populated by seed scripts.
-- Runtime hydration layer: opt-in provenance nodes such as `HydrationRun`,
-  `RuntimeObservation`, `RuntimeObservedObject`, `RuntimeObservedField`, and
-  `RuntimeFact`, plus generic `RuntimeEntity` highway nodes that attach future
-  live observations back to the API graph.
+If the command is not found or the check fails, see
+[installation troubleshooting](docs/getting-started.md#troubleshooting).
 
-## Quick Start
+### 2. Add the server to your MCP client
 
-Prerequisites:
-
-- `uv` for the native Python path, or Docker for the container path.
-- HPE Aruba Networking Central credentials for connected mode.
-- Optional GreenLake Platform credentials, otherwise GreenLake uses the Central
-  credentials when possible.
-
-### Native Python Installation (Windows x64, Apple Silicon, and Linux x64)
-
-This is the production path for local use without Docker or WSL. It runs the
-server directly on the host and stores data in the operating system's normal
-per-user application directories.
-
-Install `uv` with `winget install --id=astral-sh.uv -e` on Windows,
-`brew install uv` on macOS, or the
-[documented installer](https://docs.astral.sh/uv/getting-started/installation/)
-on Linux, then install the exact release from PyPI:
-
-```text
-uv tool install --python 3.12 --no-build netops-api-navigator==0.3.2
-netops-api-navigator doctor --profile workshop --skip-credentials
-```
-
-`uv` installs Python 3.12 when it is not already available. The GitHub release
-contains the wheel, locked `constraints.txt`, checksums, source archive, and a
-ready-to-open VS Code workshop bundle with all supported-platform dependency
-wheels. The bundle does not need PyPI access after download. Separate `.msi`,
-`.exe`, or `.pkg` installers are intentionally not required.
-
-The starter configuration is documented in [`workshop/README.md`](workshop/README.md).
-It prompts for credentials through VS Code password inputs and launches the
-strict GET-only workshop profile.
-
-### Discovery-Only Docker Profile
-
-Use this first when you want API discovery and script authoring without granting
-network credentials. Live API tools and script execution are intentionally not
-registered in this mode.
-
-```json
-{
-  "mcpServers": {
-    "netops-api-navigator-discovery": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm", "--pull", "always",
-        "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/netops-api-navigator:main"
-      ]
-    }
-  }
-}
-```
-
-### Connected Docker Profile
-
-Add credentials to enable `call_central_api`, `call_greenlake_api`, seed-script
-startup, and `execute_script`.
+For clients using the `mcpServers` JSON format, add this server entry to their MCP
+configuration:
 
 ```json
 {
   "mcpServers": {
     "netops-api-navigator": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm", "--pull", "always",
-        "-v", "central-scripts:/scripts/library",
-        "ghcr.io/tbelz/netops-api-navigator:main",
-        "--central-url", "https://de1.api.central.arubanetworks.com",
-        "--client-id", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_ID",
-        "--client-secret", "REPLACE_WITH_YOUR_CENTRAL_CLIENT_SECRET",
-        "--glp-client-id", "REPLACE_WITH_YOUR_GLP_CLIENT_ID",
-        "--glp-client-secret", "REPLACE_WITH_YOUR_GLP_CLIENT_SECRET"
-      ]
+      "command": "netops-api-navigator",
+      "args": ["--read-only"]
     }
   }
 }
 ```
 
-Add `--read-only` after the credentials to keep live API access network-side
-read-only:
+Start or reload the server in your client. For VS Code and Codex configuration,
+see [client setup](docs/getting-started.md#mcp-clients). Use the
+[shared local service](docs/getting-started.md#multiple-local-clients) if several
+clients or chats need the same database.
 
-```json
-"--read-only"
-```
+### 3. Try a request
 
-Claude Desktop reads this shape from
-`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS and
-`%APPDATA%\Claude\claude_desktop_config.json` on Windows. Claude Code uses the
-same `mcpServers` schema in `~/.config/claude-code/config.json`.
+> Find the Central API for listing sites. Show its method, path, and required
+> parameters without making a live request.
 
-CLI arguments are visible to local process/container inspection tools. On shared
-workstations, prefer an env file or platform secret store.
+The assistant should search the API catalog and return an endpoint with its
+schema details. You can also ask it to call `get_server_status` to check the
+connection. In discovery mode, `central_connected` is `false`.
 
-## Configuration
+## Connect your network
 
-You can pass the same settings through the host environment, Docker `-e` flags,
-an `--env-file`, or the CLI flags shown above.
+Provide your Central **API base URL**, **client ID**, and **client secret** through
+your client's environment or secret inputs. Follow the
+[connection guide](docs/getting-started.md#connect-to-central) for a complete
+example and optional GreenLake credentials.
 
-```env
-CENTRAL_BASE_URL=https://de1.api.central.arubanetworks.com
-CENTRAL_CLIENT_ID=your_client_id
-CENTRAL_CLIENT_SECRET=your_client_secret
-GREENLAKE_CLIENT_ID=your_glp_client_id
-GREENLAKE_CLIENT_SECRET=your_glp_client_secret
-```
+Keep `--read-only` for initial live exploration. It blocks mutating cloud API
+requests; local script and graph editing remain available. The
+[workshop profile](docs/configuration.md#profiles-and-connectivity) also removes
+user-authored script execution and direct graph writes.
 
-Copy the exact account-specific Base URL from **Central → Menu → API Gateway →
-REST API**. Do not reuse a Lab or another tenant's cluster URL; a valid token
-sent to the wrong Central cluster can still be rejected with HTTP 403.
+Once connected, try: “List my sites and summarize their devices.”
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `CENTRAL_BASE_URL` | Connected mode | none | Central API base URL |
-| `CENTRAL_CLIENT_ID` | Connected mode | none | Central OAuth2 client ID |
-| `CENTRAL_CLIENT_SECRET` | Connected mode | none | Central OAuth2 client secret |
-| `GREENLAKE_CLIENT_ID` | No | Central client ID | GreenLake OAuth2 client ID |
-| `GREENLAKE_CLIENT_SECRET` | No | Central client secret | GreenLake OAuth2 client secret |
-| `GLP_BASE_URL` | No | `https://global.api.greenlake.hpe.com` | GreenLake API base URL |
-| `GLP_INCLUDED_SLUGS` | No | default set | Comma-separated GreenLake service slugs, or `*` for all |
-| `MCP_PROFILE` | No | `full` | `full` or fail-closed `workshop` profile |
-| `READ_ONLY` | No | `false` | Refuse mutating Central/GreenLake HTTP methods |
-| `KNOWLEDGE_RELEASE_REPO` | No | this repository | GitHub repo (`owner/name`) to download knowledge DB releases from |
-| `KNOWLEDGE_RELEASE_TAG` | No | newest `knowledge-db-*` release | Immutable Knowledge DB release pin |
-| `KNOWLEDGE_ASSET_SHA256` | No | GitHub asset digest | Optional explicit archive digest |
-| `GRAPH_DB_PATH` | No | per-user application data | Runtime LadybugDB graph path |
-| `MCP_KNOWLEDGE_PROJECTION` | No | `legacy` | Runtime projection: `legacy`, `v2`, or `compiler` |
-| `MCP_COMPILER_TOOLS` | No | `false` | Register compiler provenance and health tools |
-| `MCP_RUNTIME_HYDRATION` | No | `false` | Register the opt-in runtime hydration foundation |
-| `MCP_COMPILER_DB_PATH` | No | sibling `knowledge_db_compiler` | Compiler projection sidecar path |
-| `MCP_COMPILER_AST_DB_PATH` | No | sibling `knowledge_db_ast` | Compiler AST sidecar path |
-| `SCRIPT_LIBRARY_PATH` | No | per-user application data | Script library path |
-| `INVENTORY_CACHE_TTL` | No | `300` | Runtime inventory cache TTL in seconds |
+## Documentation
 
-Native and Docker starts download the newest Knowledge DB release automatically
-when the runtime graph does not yet exist. Existing runtime graphs are reused.
-Set `KNOWLEDGE_RELEASE_TAG` for an immutable workshop snapshot. Downloads use
-the SHA-256 digest reported by GitHub and are staged before installation.
-
-Partial Central credentials are treated as a configuration error. Provide all of
-`CENTRAL_BASE_URL`, `CENTRAL_CLIENT_ID`, and `CENTRAL_CLIENT_SECRET` for
-connected mode, or omit all three for discovery-only mode.
-
-## Runtime Modes
-
-### Discovery-Only
-
-No Central credentials are configured. The server exposes the knowledge graph,
-documentation resources, `write_graph`, and script CRUD tools. It does not
-register `call_central_api`, `call_greenlake_api`, or `execute_script`.
-
-### OpenAPI files for explorers and API tools
-
-The daily scrape also publishes validated, self-contained **OpenAPI 3.1.0 JSON**
-files. Download a file or enter its stable URL into an OpenAPI 3.1-compatible tool:
-
-| Export | Current URL |
+| I want to… | Read |
 |---|---|
-| Combined Central API | [central-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-openapi.json) |
-| Monitoring, reporting, troubleshooting and token generation | [central-monitoring-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-monitoring-openapi.json) |
-| Configuration | [central-config-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-config-openapi.json) |
-| Scrape date, corrections, validation and checksums | [export-report.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/export-report.json) |
+| Set up a client, use Docker, or share a local server | [Getting started](docs/getting-started.md) |
+| Choose a profile or configure the server | [Configuration](docs/configuration.md) |
+| Look up tools and resources | [MCP reference](docs/mcp-reference.md) |
+| Import Central APIs into an OpenAPI explorer | [OpenAPI downloads](docs/openapi-export.md#consumer-interface) |
+| Run the guided VS Code workshop | [Workshop starter](workshop/README.md) |
 
-All references needed to interpret each API definition are inside that file.
-The exporter corrects unambiguous source formatting errors and keeps conflicting
-models separate. Source descriptions and provenance are retained on operations.
-These files contain Central APIs; GreenLake is not included.
+See the [documentation index](docs/README.md) for architecture, development, and
+maintenance guides.
 
-Non-deprecated stable APIs are preferred over their explicitly superseded alpha
-counterparts. The exporter removes an alpha operation only when its deprecation
-notice names an available stable successor with the same method, resource and
-servers. Other alpha APIs remain included. The report records every replacement;
-the original schemas remain in the raw archive.
+## Help and contributions
 
-The workflow runs daily at 04:00 UTC (actual start times may be later).
-`scraped_at` in the report identifies the source data, while `info.version` is a
-content fingerprint, not the upstream API's version. The scrape date does not
-guarantee that HPE's documentation matches the newest product release. A new valid
-publication updates all files together. If scraping, validation or export fails, the current
-URLs retain the last successful publication: check the report's date for freshness.
-
-Immutable snapshots appear as `openapi-*` entries in
-[GitHub Releases](https://github.com/tbelz/netops-api-navigator/releases).
-The existing `knowledge-db-*` releases and their `central-spec-cache.tar.gz`
-raw-data archives remain available. The raw archive is not an explorer import file.
-
-See [OpenAPI export development and publication](docs/openapi-export.md) for
-local verification, the transformation policy and publication setup.
-
-### Connected
-
-Central credentials are configured and validated during startup. The server
-registers live API calls, script execution, and runtime seed execution. GreenLake
-tools are registered when effective GreenLake credentials validate.
-
-### Read-Only
-
-Set `READ_ONLY=true` or pass `--read-only`. The server rejects `POST`, `PUT`,
-`PATCH`, and `DELETE` through live API tools and through script helpers. Mutating
-endpoints are filtered out of `api://endpoint-catalog`. Local graph writes,
-script saves, and script execution remain available, so this is an agent
-guardrail rather than a sandbox for untrusted script authors.
-
-### Workshop
-
-Set `MCP_PROFILE=workshop` or pass `--profile workshop` for the smallest,
-fail-closed surface intended for guided onboarding. The profile always enables
-network read-only mode and exposes graph/API discovery, live topology queries,
-a secret-free status tool, and—when valid Central credentials are present—GET-only
-Central API calls plus bounded collection pagination. Two trusted package seeds
-populate sites, devices, groups, and L2 links in the local graph at startup.
-User-authored script creation/execution, direct local graph writes, GreenLake,
-runtime hydration, compiler tools, and prompts remain unavailable.
-
-Run `netops-api-navigator doctor --profile workshop` before connecting an
-MCP client. Add `--skip-credentials` to validate only the local installation.
-The prebuilt [`workshop/`](workshop/) starter is included as a ZIP in tagged
-GitHub releases.
-
-`get_server_status.central_connected=true` confirms OAuth token issuance only;
-Central still authorizes each API endpoint for the token's workspace and user
-role. Use `topology_sync` and `graph://seed-status` to detect endpoint-level
-403 errors or partial topology refreshes.
-
-### Compiler / v2 Smoke
-
-Recent PRs moved v2 API discovery back onto the shared graph aliases and removed
-the parallel compiler endpoint/context discovery tools. Use this profile to load
-the compiler/v2 runtime graph and enable the remaining compiler diagnostics:
-
-```json
-{
-  "mcpServers": {
-    "netops-api-navigator-v2-smoke": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm", "--pull", "always",
-        "-v", "netops-api-navigator-v2-data:/data",
-        "-v", "central-scripts:/scripts/library",
-        "-e", "KNOWLEDGE_RELEASE_REPO=tbelz/netops-api-navigator",
-        "-e", "MCP_KNOWLEDGE_PROJECTION=v2",
-        "-e", "MCP_COMPILER_TOOLS=true",
-        "ghcr.io/tbelz/netops-api-navigator:main"
-      ]
-    }
-  }
-}
-```
-
-`MCP_COMPILER_TOOLS=true` adds only:
-
-- `get_openapi_source_detail`
-- `get_compiler_graph_health`
-
-It does not add `find_api_endpoints`, `get_api_endpoint_context`, or
-`get_api_schema_context`; those tools were removed. Use `query_fts`,
-`query_api_schema`, and `query_yang` for normal discovery.
-
-### Runtime Hydration Foundation
-
-Set `MCP_RUNTIME_HYDRATION=true` to register the opt-in runtime hydration
-foundation. This adds status and candidate-planning tools plus a bounded
-GET-only `hydrate_runtime_endpoint` executor that calls a selected endpoint and
-persists raw runtime observations with provenance back to the API graph.
-Runtime observations can be inspected with `list_runtime_observations` and
-`get_runtime_observation`, and clear-identity observations can be promoted into
-generic `RuntimeFact` nodes with `materialize_runtime_facts`. Agents can also
-ask `plan_runtime_hydration` for a read-only plan that combines endpoint
-capability, supplied parameters, provider readiness, existing observations,
-freshness, and materialized facts before making live calls. Clear-identity
-facts can be rolled up with `promote_runtime_entities` into generic
-`RuntimeEntity` highways keyed by provider, entity type, and identity key. This
-keeps the common path fast without requiring one hand-written table per Central
-domain.
-
-## Tool Surface
-
-### Graph And Discovery Tools
-
-| Tool | Mode | Purpose |
-| --- | --- | --- |
-| `query_fts` | Always | Full-text search over endpoint, property, doc, script, and runtime indexes. Use this for keyword-first discovery. |
-| `query_api_schema` | Always | Focused Cypher over endpoints, parameters, request/response bodies, schema components, properties, and API/YANG edges. |
-| `query_yang` | Always | YANG path, CLI command, and config-profile reverse lookup. |
-| `query_topology` | Always | Runtime topology graph queries over orgs, sites, devices, groups, and neighbor edges. |
-| `query_graph` | Always | Broad read-only Cypher escape hatch for cross-domain graph queries. |
-| `get_raw_schema` | Always | Fetch raw OpenAPI JSON for known `SchemaComponent` IDs when graph fields are not enough. |
-| `write_graph` | Full profile | Local graph writes for enrichment and script metadata. |
-
-The read tools support batch mode with `queries=[...]`. Responses are capped to
-keep MCP payloads manageable; oversized cells return truncation envelopes with
-next-step hints.
-
-### Live API Tools
-
-| Tool | Mode | Purpose |
-| --- | --- | --- |
-| `call_central_api` | Connected | Authenticated Central REST call with graph-backed pre-flight validation. |
-| `paginate_central_api` | Connected workshop | Complete, bounded GET-only Central collection fetch with cursor/offset auto-detection. |
-| `call_greenlake_api` | Connected plus GLP credentials | Authenticated GreenLake Platform REST call with validation. |
-
-### Script Tools
-
-| Tool | Mode | Purpose |
-| --- | --- | --- |
-| `list_scripts` | Always | List saved and seed scripts, optionally by tag. |
-| `get_script_content` | Always | Read a script from the library. |
-| `save_script` | Always | Save or update a reusable Python script. |
-| `execute_script` | Connected | Run a script with Central/GreenLake helpers injected. |
-
-### Compiler Tools
-
-| Tool | Mode | Purpose |
-| --- | --- | --- |
-| `get_openapi_source_detail` | `MCP_COMPILER_TOOLS=true` | Resolve a compiler projection row back to projection data, provenance, AST metadata, and raw OpenAPI source. |
-| `get_compiler_graph_health` | `MCP_COMPILER_TOOLS=true` | Run bounded traversal-health samples against compiler artifacts. |
-
-### Runtime Hydration Tools
-
-| Tool | Mode | Purpose |
-| --- | --- | --- |
-| `get_runtime_hydration_status` | `MCP_RUNTIME_HYDRATION=true` | Report the opt-in hydration stage, graph availability, provider readiness, and schema tables. |
-| `list_runtime_hydration_providers` | `MCP_RUNTIME_HYDRATION=true` | List supported provider boundaries, aliases, configured status, and hydration client availability. |
-| `list_runtime_hydration_candidates` | `MCP_RUNTIME_HYDRATION=true` | List GET endpoints that can be planned for future generic hydration from the compiled API graph. |
-| `plan_runtime_hydration` | `MCP_RUNTIME_HYDRATION=true` | Plan whether to use facts, materialize observations, hydrate, refresh, configure a provider, or ask for parameters. |
-| `hydrate_runtime_endpoint` | `MCP_RUNTIME_HYDRATION=true` plus credentials | Execute one bounded GET hydration and persist raw observation/provenance nodes. |
-| `list_runtime_observations` | `MCP_RUNTIME_HYDRATION=true` | List previously persisted runtime observations without calling live APIs. |
-| `get_runtime_observation` | `MCP_RUNTIME_HYDRATION=true` | Fetch one observation with observed objects and fields. |
-| `get_runtime_hydration_state` | `MCP_RUNTIME_HYDRATION=true` | Report whether hydrated state for an endpoint is missing, fresh, stale, or unknown. |
-| `materialize_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | Promote observed objects with clear identity into generic `RuntimeFact` nodes. |
-| `list_runtime_facts` | `MCP_RUNTIME_HYDRATION=true` | List materialized facts by endpoint, entity type, or identity key. |
-| `get_runtime_fact` | `MCP_RUNTIME_HYDRATION=true` | Fetch one materialized fact with provenance back to observation, run, and endpoint. |
-| `promote_runtime_entities` | `MCP_RUNTIME_HYDRATION=true` | Roll clear-identity facts into generic provider-scoped `RuntimeEntity` highway nodes. |
-| `list_runtime_entities` | `MCP_RUNTIME_HYDRATION=true` | List generic entity highways by provider, endpoint, entity type, or identity key. |
-| `get_runtime_entity` | `MCP_RUNTIME_HYDRATION=true` | Fetch one generic entity highway with fact-level provenance. |
-
-## Recommended Discovery Flow
-
-1. Read `api://endpoint-catalog` or `docs://endpoint-catalog` for a path-tree
-   overview when the endpoint family is already obvious.
-2. Use `query_fts` when starting from a keyword such as a feature name, field,
-   config concept, or CLI term.
-3. Use `query_api_schema` to inspect exact parameters, request bodies, response
-   schemas, `COMPOSED_OF`, `PROPERTY_OF_TYPE`, and `HAS_ITEM_SCHEMA` traversal.
-4. Use `query_yang` when mapping YANG paths, CLI commands, or config-profile
-   concepts back to API endpoints and schema properties.
-5. Use `get_raw_schema` only for a known component when the structured graph
-   omits source detail that you need.
-6. In connected mode, call `call_central_api` or `call_greenlake_api` after
-   validating the method, path, parameters, and body shape.
-
-## Knowledge DB Startup
-
-When `KNOWLEDGE_RELEASE_REPO` is set, the server downloads the latest released
-knowledge artifact before opening a new graph. Existing runtime graphs are not
-automatically refreshed, because they also contain local state. `MCP_KNOWLEDGE_PROJECTION=legacy`
-uses `knowledge_db.tar.gz`; `v2` or `compiler` uses
-`knowledge_db_compiler.tar.gz`.
-
-The local manifest records the release tag, selected artifact, archive member,
-and projection so the server does not confuse same-release legacy and v2
-installs. If GitHub is unavailable but a local DB exists, startup keeps using
-the local copy. WAL corruption and short page reads stop startup with a diagnostic;
-the server never deletes the database or its sidecars to hide the error.
-
-For an explicit restore or knowledge upgrade, stop every process using the graph,
-preserve the entire graph directory (including `.wal`, `.shadow`, and `manifest.json`),
-and select a new empty `GRAPH_DB_PATH` in a separate directory. The next start installs
-a verified snapshot there. This restores knowledge only; local graph changes must be
-recreated or recovered separately. Do not remove only the WAL or mix an old WAL with
-a replacement database.
-
-On STDIO EOF or SIGTERM, the server cancels automatic seed scripts, drains graph IPC
-requests, and releases the database. Native statements already executing must finish
-before close; SIGKILL or a client grace period shorter than that work can still prevent
-cleanup. See [the restart investigation](docs/graph-restart-investigation.md).
-
-## Development
-
-Use `uv` for local Python commands.
-
-```bash
-uv sync
-uv run netops-api-navigator
-```
-
-Fast local test loops:
-
-```bash
-bash scripts/dev_test.sh
-bash scripts/test_changed.sh
-```
-
-The full suite is slower and is normally left to CI or broader validation:
-
-```bash
-uv run pytest
-```
-
-Build the Docker image locally:
-
-```bash
-docker build -t netops-api-navigator .
-```
-
-## Python Releases
-
-Every pull request builds the Python distribution and smoke-tests the exact
-wheel on Windows x64, macOS Apple Silicon, and Linux. These jobs run the
-installed `doctor` command and a real MCP stdio initialize/tool-list handshake.
-
-Pushing a version tag such as `v0.3.0` runs the same gates and, after they pass,
-publishes the wheel and source distribution to PyPI using Trusted Publishing.
-It also creates a GitHub release containing the distributions, locked runtime
-constraints, checksums, and the ready-to-open workshop ZIP. Repository and PyPI
-Trusted Publishing must be configured before the first tagged release.
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for build-pipeline details and
-test-marker guidance. Architecture decisions live in [docs/adr/](docs/adr/).
+Report problems in [GitHub Issues](https://github.com/tbelz/netops-api-navigator/issues).
+Include your platform, installed version, and sanitized `doctor` output.
+For code changes and local checks, read the [development guide](docs/DEVELOPMENT.md).
 
 ## License
 
-MIT
-
-### Multiple local chats sharing one graph
-
-A STDIO client owns its server process. If a desktop starts a separate process
-for each chat, those processes cannot all open the same Ladybug graph. A second
-owner fails at startup; opening the graph read-only does not bypass an active
-writer. Do not delete the database or WAL to resolve ownership errors.
-
-Use one persistent local service for multiple chats:
-
-```bash
-# Supply MCP_HTTP_TOKEN from a protected environment/secret store; generate it
-# once with secrets.token_urlsafe(32), and share it only with trusted local clients.
-netops-api-navigator serve --transport streamable-http --port 8765
-```
-
-The service requires `MCP_HTTP_TOKEN` (at least 32 printable ASCII characters,
-without spaces), binds only to `127.0.0.1`, and serves `/mcp`. Configure its usual
-Central credentials, graph and script-library paths in the service environment.
-Run exactly one instance under your OS service manager. Start it before connecting
-clients. Each client session uses the same account, tools and persistent graph;
-closing a chat ends that session without closing the database. This mode does not
-provide per-user authorization or expose a public remote ChatGPT endpoint.
-
-For a local Codex client, replace the STDIO `command`/`args` configuration with:
-
-```toml
-[mcp_servers.arubacentral]
-url = "http://127.0.0.1:8765/mcp"
-bearer_token_env_var = "MCP_HTTP_TOKEN"
-```
-
-The token must also be available in the **desktop client's** environment, not just
-the service environment. See the [official MCP configuration documentation](https://developers.openai.com/codex/mcp).
-Keep the token out of source control. Missing or incorrect tokens receive HTTP 401.
-STDIO remains the default for a single client.
-
-For an existing installation, first arrange a graceful stop of the current graph
-owner, preserve any existing corruption evidence, and then start the shared
-service against the same persistent graph. Never start both transports as writers
-of that graph. Verify initialization and graph queries in two concurrent native
-chats before resuming work. Service shutdown drains HTTP sessions and then follows
-the same seed/IPC/graph cleanup path as STDIO.
-
-### Before upgrading an existing Ladybug graph
-
-The runtime now pins the official `ladybug==0.17.1` distribution to use available
-FTS/algo extensions. **Its first writable open upgrades older graphs from storage
-format 40 to 41, including startup or `doctor`; the old engine cannot reopen them.**
-Stop all graph owners and preserve the complete graph directory, manifest and
-sidecars before starting this version. Rollback requires restoring that backup,
-not merely reinstalling the older Python package. See the
-[upgrade qualification and rollback procedure](docs/ladybug-extension-upgrade.md).
+[MIT](LICENSE). HPE product names describe compatibility; trademarks belong to
+their respective owners.
