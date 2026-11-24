@@ -9,16 +9,17 @@ Docker, and startup problems.
 ## Native installation
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then follow
-the quickstart. The native package targets Windows x64, macOS Apple Silicon, and
-Linux x64. Python 3.12 can be supplied by uv; no repository checkout is required.
+the quickstart. The native package targets Windows x64, macOS 15+ on Apple Silicon,
+and Linux x64/ARM64 with glibc. Python 3.12 can be supplied by uv; no repository
+checkout is required.
 
 The install command selects the current PyPI release. To reproduce a particular
 release, append `==VERSION` to the package name using a version listed in
 [Releases](https://github.com/tbelz/netops-api-navigator/releases). For a source
 checkout, use the [development setup](DEVELOPMENT.md#local-setup).
 
-A fresh start requires network access for Python/package installation, the GitHub
-knowledge release, and any database extensions required by the installed engine.
+A fresh start requires network access for Python/package installation and the
+GitHub knowledge release. Packages from 0.3.3 onward include the database extensions.
 Discovery mode avoids Central API calls; it does not imply a fully offline install.
 Existing local graph data is reused on later starts.
 
@@ -206,7 +207,7 @@ each client after switching. For independent graphs, give each process a separat
 | Symptom | Next step |
 |---|---|
 | Executable not found | Run `uv tool update-shell`, reopen the terminal/client, or set the client's `command` to the executable's absolute path. `uv tool dir --bin` shows its directory. |
-| `doctor` reports an extension download/load error | Check the [extension and upgrade guide](ladybug-extension-upgrade.md). This is an engine/install failure, not a Central credential error. Include the engine version and failing extension URL in a sanitized issue. |
+| `doctor` reports an extension error | Check the [extension and upgrade guide](ladybug-extension-upgrade.md). This is an engine/install failure, not a Central credential error. Include the engine version and sanitized diagnostic in an issue. |
 | First start cannot obtain a knowledge database | Check GitHub access and the configured release/digest. Run `doctor --skip-credentials` outside the MCP client to see the error. |
 | Partial Central credentials | Supply all three Central variables, or unset all three for discovery mode. |
 | Token succeeds but an endpoint returns 403 | Check the account-specific base URL and the client's workspace/role permissions. |

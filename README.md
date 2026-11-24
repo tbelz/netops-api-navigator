@@ -25,7 +25,8 @@ synchronization, and script execution require a connection to your environment.
 
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) and an MCP
 client that can run a local stdio server. The native installation targets Windows
-x64, macOS on Apple Silicon, and Linux x64; Docker and WSL are not required.
+x64, macOS 15+ on Apple Silicon, and Linux x64/ARM64 with glibc.
+Docker and WSL are not required.
 
 Already using Navigator? Read the [upgrade instructions](docs/ladybug-extension-upgrade.md#required-deployment-and-rollback-procedure)
 before running a newer version against an existing database.

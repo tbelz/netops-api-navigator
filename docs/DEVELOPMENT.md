@@ -4,14 +4,17 @@
 
 ## Local setup
 
-Use Python 3.12 or newer through uv. Check the
-[engine distribution guide](ladybug-extension-upgrade.md) for preparation required
-by the source revision, then run from the repository root:
+Use Python 3.12 or newer through uv. From the repository root, stage the verified
+extension bundle before installing the project:
 
 ```sh
+uv run --no-project python scripts/prepare_extensions.py
 uv sync --frozen --extra test
 uv run netops-api-navigator --help
 ```
+
+See the [engine distribution guide](ladybug-extension-upgrade.md) for bundle
+verification, supported platforms, and extension smoke checks.
 
 For an isolated discovery runtime, select paths under the gitignored `tmp/`
 directory before starting the server. The following example is for a POSIX shell;
@@ -26,8 +29,8 @@ uv run netops-api-navigator --read-only
 ```
 
 Leave Central credentials unset for discovery-only work. A first run downloads
-knowledge and may need engine extensions. Do not point experimental runs at your
-normal runtime database. See [configuration](configuration.md) for profiles,
+knowledge. Do not point experimental runs at your normal runtime database.
+See [configuration](configuration.md) for profiles,
 pins, and source-versus-release differences.
 
 Before editing, follow [AGENTS.md](../AGENTS.md), including its rules for long

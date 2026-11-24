@@ -37,8 +37,9 @@ that owns the clients, graph, optional script IPC server, and background seeds:
    otherwise select discovery-only mode.
 3. Install a verified knowledge release for a new graph, check any explicit pin,
    and obtain sidecars when compiler tools are enabled.
-4. Open the graph, initialize its schema/indexes, and check the knowledge schema
-   version. An incompatible or unreadable graph stops startup.
+4. Preflight the bundled extensions before opening the persistent graph, then
+   initialize its schema/indexes and check the knowledge schema version.
+   Missing/unloadable extensions or an incompatible/unreadable graph stop startup.
 5. Validate GreenLake when applicable. Its failure disables GreenLake access
    without preventing a valid Central connection.
 6. Register the profile's tools and resources, prepare script support where
@@ -48,7 +49,7 @@ that owns the clients, graph, optional script IPC server, and background seeds:
 `doctor` constructs the runtime without starting background seeds or entering
 the MCP serving loop, emits a status report, and closes it. `--skip-credentials`
 skips authentication checks; it still opens the local graph and may download
-knowledge/extensions. It is not a read-only database inspection command.
+knowledge. It is not a read-only database inspection command.
 
 One process owns a runtime graph. GraphManager serializes access and manages
 connections within that owner. Script subprocesses use IPC instead of opening
