@@ -116,6 +116,15 @@ Local qualification on 2026-11-24 used disposable copies only:
   `bc92fe72703f7033430d77f3df9869d158f47e2c55109c2cc69163e32e9cd9dd`.
   Its source bytes were unchanged while the writable copy became storage 43.
 
-A connected Central check additionally requires valid credentials. Local credentials
-found during this investigation returned OAuth HTTP 401, so offline qualification
-does not claim connected API validation. Do not paste secrets into logs or issues.
+- Restoring the complete storage-41 backup preserved its hash; 0.17.1 read all
+  1,931 endpoints from that restored copy and rejected the upgraded version-43 file.
+- Connected qualification with refreshed credentials passed OAuth, a GET of the
+  Central sites endpoint, and an actual MCP initialize/tools-list exchange in the
+  workshop read-only profile. No cloud configuration was changed.
+- PR qualification passed native Windows x64, macOS ARM64 and Linux x64 wheel
+  smoke tests, plus offline Docker, compiler and hydration smoke on both Linux
+  architectures. Local tests passed 714 cases; nine additional hydrated-spec
+  cases passed (one had no matching fixture).
+
+Do not paste credentials into logs or issues. Repeat the connected read-only smoke
+against the intended environment when updating its deployment.
