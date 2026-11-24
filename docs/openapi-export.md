@@ -1,15 +1,24 @@
 # Central OpenAPI export
 
+[Documentation index](README.md)
+
 ## Consumer interface
 
-The current publication lives at
-`https://tbelz.github.io/netops-api-navigator/openapi/latest/`:
+Download a definition or enter its URL in an OpenAPI 3.1-compatible explorer:
 
-- `central-openapi.json`: combined Central API, preferring confirmed stable successors.
-- `central-monitoring-openapi.json`: the MRT source, including token generation.
-- `central-config-openapi.json`: the Config source.
-- `export-report.json`: source timestamp and health, file provenance, correction
-  records, workflow/commit provenance, validation results and SHA-256 checksums.
+| Export | Download |
+|---|---|
+| Combined Central API | [central-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-openapi.json) |
+| Monitoring, reporting, troubleshooting, and token generation | [central-monitoring-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-monitoring-openapi.json) |
+| Configuration | [central-config-openapi.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/central-config-openapi.json) |
+| Source time, corrections, validation, and checksums | [export-report.json](https://tbelz.github.io/netops-api-navigator/openapi/latest/export-report.json) |
+
+These exports contain Central APIs, not GreenLake. Stable URLs keep the last
+successful publication if a later export fails; inspect the report's source date
+for freshness. Immutable snapshots are published as `openapi-*` entries in
+[GitHub Releases](https://github.com/tbelz/netops-api-navigator/releases).
+The `central-spec-cache.tar.gz` raw archive attached to knowledge releases is
+source material, not an explorer import file.
 
 Import JSON directly or supply its URL to an OpenAPI 3.1-capable explorer. GitHub
 Pages serves the files publicly with JSON content type and cross-origin access.

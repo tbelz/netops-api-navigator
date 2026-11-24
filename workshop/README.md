@@ -11,6 +11,11 @@ with, sponsored by, endorsed by, or supported by Hewlett Packard Enterprise.
 HPE Aruba Networking Central and HPE GreenLake Platform are referenced solely
 to describe compatibility. All trademarks belong to their respective owners.
 
+For a general installation, see the
+[getting-started guide](https://github.com/tbelz/netops-api-navigator/blob/main/docs/getting-started.md).
+Before reusing an existing database with a newer bundle, follow the
+[upgrade procedure](https://github.com/tbelz/netops-api-navigator/blob/main/docs/ladybug-extension-upgrade.md#required-deployment-and-rollback-procedure).
+
 ## Supported platforms
 
 - Windows 10/11 x64 without WSL or Docker
@@ -29,8 +34,11 @@ to describe compatibility. All trademarks belong to their respective owners.
 4. Verify the bundled installation and knowledge database before the workshop:
 
    ```text
-   uv tool run --python 3.12 --no-build --constraints constraints.txt --no-index --find-links wheelhouse --from ./netops_api_navigator-0.3.0-py3-none-any.whl netops-api-navigator doctor --profile workshop --knowledge-release-tag knowledge-db-20260907-043531 --knowledge-sha256 c9730faf52ecb99b6409d8777814982d684ffed7c673c4a749842cb520c8a56e --skip-credentials
+   uv tool run --python 3.12 --no-build --constraints constraints.txt --no-index --find-links wheelhouse --find-links . --from netops-api-navigator netops-api-navigator doctor --profile workshop --knowledge-release-tag knowledge-db-20260907-043531 --knowledge-sha256 c9730faf52ecb99b6409d8777814982d684ffed7c673c4a749842cb520c8a56e --skip-credentials
    ```
+
+   `--find-links .` selects the project wheel included in the extracted bundle;
+   `--no-index` keeps resolution local to that wheel and `wheelhouse`.
 
    `uv` installs Python 3.12 in the current user context when necessary. The
    server and all Python package dependencies are loaded from this bundle;

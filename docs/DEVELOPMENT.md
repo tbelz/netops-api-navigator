@@ -1,46 +1,51 @@
-# Graph Schema & Build Pipeline
+# Development
+
+[Documentation index](README.md) · [Architecture](TECHNICAL_OVERVIEW.md) · [Maintenance](maintenance.md)
+
+## Local setup
+
+Use Python 3.12 or newer through uv. Check the
+[engine distribution guide](ladybug-extension-upgrade.md) for preparation required
+by the source revision, then run from the repository root:
+
+```sh
+uv sync --frozen --extra test
+uv run netops-api-navigator --help
+```
+
+For an isolated discovery runtime, select paths under the gitignored `tmp/`
+directory before starting the server. The following example is for a POSIX shell;
+set the same environment variables in PowerShell on Windows:
+
+```sh
+mkdir -p tmp/dev-runtime
+GRAPH_DB_PATH="$PWD/tmp/dev-runtime/graph" \
+SCRIPT_LIBRARY_PATH="$PWD/tmp/dev-runtime/scripts" \
+SPEC_CACHE_DIR="$PWD/tmp/dev-runtime/specs" \
+uv run netops-api-navigator --read-only
+```
+
+Leave Central credentials unset for discovery-only work. A first run downloads
+knowledge and may need engine extensions. Do not point experimental runs at your
+normal runtime database. See [configuration](configuration.md) for profiles,
+pins, and source-versus-release differences.
+
+Before editing, follow [AGENTS.md](../AGENTS.md), including its rules for long
+commands and repo-local scratch/log files. Documentation changes belong in the
+existing page for their audience; keep the README's entry path short.
 
 ## Overview
 
 The graph schema uses a single bootstrap DDL layer:
 
-1. **Bootstrap DDL** ([src/netops_api_navigator/graph/schema.py](src/netops_api_navigator/graph/schema.py)) — Static node/relationship tables for the core domain model (Org, Site, Device, ConfigProfile, etc.) and knowledge layer (ApiEndpoint, ApiCategory, DocSection, Script).
-
-## Runtime modes
-
-The server has two startup modes:
-
-- **Connected** — `CENTRAL_BASE_URL` / `CENTRAL_CLIENT_ID` /
-  `CENTRAL_CLIENT_SECRET` are set (via env vars or the equivalent
-  `--central-url` / `--client-id` / `--client-secret` CLI args). The
-  OAuth2 token is validated at startup, the auto-run seeds populate the
-  domain graph, and the live-API tools (`call_central_api`,
-  `call_greenlake_api`, `execute_script`) are registered.
-- **Discovery-only** — no Central credentials configured. The server
-  boots without contacting Central, skips the auto-run seeds, and only
-  registers the graph query/write tools and the script-CRUD tools.
-  Useful for local UI work and for review sessions where the agent
-  drafts API calls / scripts that the user runs later in a connected
-  workspace. Locally: `uv run netops-api-navigator` with an empty
-  env.
+1. **Bootstrap DDL** ([src/netops_api_navigator/graph/schema.py](../src/netops_api_navigator/graph/schema.py)) — Static node/relationship tables for the core domain model (Org, Site, Device, ConfigProfile, etc.) and knowledge layer (ApiEndpoint, ApiCategory, DocSection, Script).
 
 ## Graph query tools (ADR-012)
 
-The graph surface is exposed through **five `query_*` tools** that share
-one Cypher executor, the same row caps, and the same byte caps. They
-differ only in their docstrings (canned patterns) so clients with
-limited per-tool description budgets can pull in only the docs they
-need:
-
-| Tool | Use when |
-|------|----------|
-| `query_graph` | Generic escape hatch. Use when none of the focused aliases fit. |
-| `query_api_schema` | Walking the OpenAPI surface — endpoints, components, properties, `COMPOSED_OF`, `PROPERTY_OF_TYPE`, `supportedDeviceTypes` filter. |
-| `query_fts` | Full-text search via `CALL QUERY_FTS_INDEX(...)` over `api_fts`, `doc_fts`, `script_fts`, `property_fts`, `device_fts`, `site_fts`, `config_fts`. |
-| `query_topology` | Live network — Org / SiteCollection / Site / Device / DeviceGroup / UnmanagedDevice and their `HAS_*` / `CONNECTED_TO` / `LINKED_TO` edges. |
-| `query_yang` | `YangPath`, `PROPERTY_AT_YANG`, `CONFIGURES_YANG` provenance. |
-
-All five are read-only and idempotent. Writes go through `write_graph`.
+Use the [MCP reference](mcp-reference.md#graph-and-discovery) for tool
+availability and query/batch behavior. The focused aliases share an executor;
+write operations use `write_graph` in the full profile. `query_runtime` provides
+an additional view of the optional runtime data layers.
 
 ### FTS indexes
 
@@ -59,35 +64,12 @@ from hits to whatever you actually want.
 | `Site` | `site_fts` | runtime | Populated by live seed. |
 | Config nodes | `config_fts` | runtime | Populated by live seed. |
 
-### Batch mode on read tools
+### Batching and response limits
 
-Every `query_*` tool accepts an optional `queries: list[dict]`
-argument. Each item is a `{cypher, parameters?, label?}` dict.
-When `queries` is set the single-call `cypher` / `parameters`
-arguments are ignored (mirrors `call_central_api(calls=...)`).
-
-| Env var | Default | What it caps |
-|---------|---------|--------------|
-| `MCP_GRAPH_BATCH_MAX_ITEMS` | `25` | Maximum items per batch. Over-cap calls fail fast with a `ToolError`. |
-| `MCP_GRAPH_BATCH_RESPONSE_BYTES` | `200000` | Aggregate byte cap on the whole batch envelope. Trailing items are dropped and `truncated: true, kept_items: N` is set. Per-item caps still apply. |
-
-Batches run sequentially, continue-on-error, and return
-`{batch: true, total, ok, failed, results: [...]}`. Each item's
-envelope is `{ok: bool, label, result | error}`.
-
-### Response caps and `get_raw_schema`
-
-Two byte caps protect agent context budgets:
-
-| Env var | Default | What it caps |
-|---------|---------|--------------|
-| `MCP_GRAPH_PER_CELL_BYTES` | `4096` | Per-cell string size. Larger cells are replaced with a `{"_truncated": true, "preview": ..., "size_bytes": N, "hint": "..."}` envelope. |
-| `MCP_GRAPH_PER_RESPONSE_BYTES` | `50000` | Total response size after row capping. Over-cap responses come back as `{"truncated": true, "reason": "response_byte_cap", ...}` with as many rows as fit. |
-| `MCP_GRAPH_RAW_SCHEMA_MAX_BYTES` | `200000` | Hard cap on `get_raw_schema(component_id)`. Above this the call is refused with a hint to walk `COMPOSED_OF*0..5` → `HAS_PROPERTY` instead of pulling the blob. |
-
-`get_raw_schema(component_id)` is the escape hatch for the per-cell
-envelope: it returns the raw `bodyJson` string for a single
-`SchemaComponent`, subject to the hard cap above.
+The [MCP reference](mcp-reference.md#graph-and-discovery) owns input behavior;
+[configuration](configuration.md#graph-response-limits) owns the limits and their
+defaults. Keep implementations and those references aligned when changing caps
+or truncation envelopes.
 
 ### `component_id` convention
 
@@ -113,8 +95,9 @@ RETURN c.component_id
 
 `graph/invariants.py` exposes `assert_graph_invariants(conn, strict=...)`,
 run by `[3d/6] Auditing graph invariants` in `build_knowledge_db.py`
-and by `tests/test_real_spec_ingest_smoke.py`. Each check raises
-`InvariantViolation(invariant, detail, sample)` on failure. INV-8
+and by `tests/test_real_spec_ingest_smoke.py`. Checks return
+`InvariantViolation` records; strict mode raises `InvariantViolationError`
+containing the collected violations. INV-8
 (`no_orphaned_properties`) catches `Property` rows that are not
 reachable from any `SchemaComponent` via `HAS_PROPERTY` — the failure
 mode behind ADR-013's eviction fix.
@@ -159,17 +142,29 @@ against the pre-ADR-012 populator.
 
 - `CALL show_tables() RETURN * WHERE type = 'NODE'` is **invalid** — WHERE doesn't work with CALL. Filter in Python after `rows_as_dict()`.
 - Always use `IF NOT EXISTS` in DDL for idempotent schema application.
-- Use `python3.12` for tests (python3/3.10 lacks the configured `ladybug` environment).
+- Use `uv run` for Python commands so tests use the repository environment.
 
 ## Testing
+
+Run the fast subset before every push. The full suite remains the CI gate; it
+is not the per-edit feedback loop. Keep long runs in one background terminal,
+redirect logs into `tmp/`, and poll the existing run instead of starting it again.
+
+In a checkout without `.env`, define the Central variables as empty for test
+collection, matching CI. Some helper imports require the keys to exist even when
+live tests are excluded. In a POSIX shell:
+
+```sh
+CENTRAL_BASE_URL= CENTRAL_CLIENT_ID= CENTRAL_CLIENT_SECRET= bash scripts/dev_test.sh
+```
 
 The pytest suite is organised by **markers** (declared in
 [pyproject.toml](../pyproject.toml)):
 
 | Marker       | What it covers                                          | Credentials needed |
 |--------------|---------------------------------------------------------|--------------------|
-| `unit`       | Pure-Python logic, no network, no graph DB              | No                 |
-| `integration`| Local subprocess / IPC / seed startup against a temp DB | No (some)          |
+| `unit`       | Fast in-process checks; some use a local graph fixture | No                 |
+| `integration`| Integration scenarios; collection requires Central credentials | Yes |
 | `live_api`   | Real Central / GreenLake API calls                      | **Yes**            |
 | `slow`       | Anything that takes more than a few seconds             | n/a                |
 
@@ -185,7 +180,10 @@ accepted and back-filled to the canonical names.
 uv sync --extra test
 
 # Fast feedback loop (no creds required)
-uv run pytest -m "unit and not slow"
+bash scripts/dev_test.sh
+
+# Tests selected from changed source files
+bash scripts/test_changed.sh
 
 # Full suite (skips live_api without .env)
 uv run pytest
@@ -198,6 +196,15 @@ uv run pytest --cov --cov-report=term-missing
 ```
 
 ### Real-spec ingestion fixtures (ADR-011)
+
+Tests marked `real_spec` need the downloaded Central cache. Hydrate it once:
+
+```sh
+bash scripts/hydrate_test_fixtures.sh
+```
+
+The cache is stored in `tmp/test_fixtures/central_spec_cache/`. This is separate
+from the small committed excerpts below.
 
 The OAS → graph ingestion code is regression-tested against real
 HPE Aruba Central / GreenLake spec excerpts at
@@ -217,9 +224,8 @@ full pipeline and asserts the post-flush invariants
 
 ### Build-time invariants gate
 
-`scripts/build_knowledge_db.py` now runs the four invariants from
-`graph/invariants.py` after the schema subgraph is populated. Two new
-flags:
+`scripts/build_knowledge_db.py` runs the checks defined in
+`graph/invariants.py` after the schema subgraph is populated. Its audit flags:
 
 - `--strict` — turn violations into a non-zero exit (CI default).
 - `--no-invariants` — skip the audit entirely (rarely useful).
@@ -236,11 +242,16 @@ for the rationale.
 
 ### Docker E2E layer
 
-The shell scripts at the repo root (`test_all.sh`, `test_mcp.sh`,
-`test_inventory.sh`, etc.) exercise the built Docker image end-to-end
-and are **not** invoked by `pytest`. Build the image first with
-`docker build -t netops-api-navigator:test .` and then run them
-manually.
+The smoke scripts under `scripts/` exercise the built image and are not invoked
+by pytest. Build an image first, then pass its tag to the relevant script:
+
+```sh
+docker build -t netops-api-navigator:test .
+bash scripts/ci_docker_v2_smoke.sh netops-api-navigator:test
+bash scripts/ci_docker_runtime_hydration_smoke.sh netops-api-navigator:test
+```
+
+These checks use temporary Docker volumes and download knowledge artifacts.
 
 ### Standalone smoke scripts
 
